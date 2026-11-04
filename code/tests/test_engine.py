@@ -298,6 +298,24 @@ class GhostTraceEngineTests(unittest.TestCase):
             with zipfile.ZipFile(first) as archive:
                 names = archive.namelist()
                 self.assertEqual(archive.testzip(), None)
+                self.assertEqual(len(names), len(set(names)))
+                required_reports = {
+                    "evaluation/evaluation_report.md": (
+                        REPO_ROOT
+                        / "code"
+                        / "evaluation"
+                        / "evaluation_report.md"
+                    ),
+                    "evaluation/usage_report.md": (
+                        REPO_ROOT / "code" / "evaluation" / "usage_report.md"
+                    ),
+                }
+                self.assertTrue(required_reports.keys() <= set(names))
+                for archive_path, source_path in required_reports.items():
+                    self.assertEqual(
+                        archive.read(archive_path),
+                        source_path.read_bytes(),
+                    )
                 self.assertFalse(
                     any(
                         name == "log.txt"
