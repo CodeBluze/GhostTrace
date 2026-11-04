@@ -20,8 +20,14 @@ RESOURCE_RE = re.compile(
 EMAIL_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
 USER_RE = re.compile(r"\buser[_\s-]?(\d+)\b", re.I)
 HASH_RE = re.compile(r"\b[a-f0-9]{64}\b", re.I)
+FILE_REF_RE = re.compile(
+    r"\b[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:csv|jpeg|jpg|json|pdf|png|zip)\b",
+    re.I,
+)
 KV_RE = re.compile(r"([A-Za-z_][\w.-]*)=(\"[^\"]*\"|'[^']*'|\S+)")
 ISO_PREFIX_RE = re.compile(r"^\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b")
+MESSAGE_RE = re.compile(r'\bmessage="((?:\\.|[^"\\])*)"')
+TRACE_RE = re.compile(r"\b(?:tr|rb)-\d{5,}\b", re.I)
 
 PREFIX_META = {
     "account": ("account_service", "USER_PROFILE"),
@@ -176,7 +182,12 @@ def _subjects(record: dict[str, Any]) -> set[str]:
 def _has_pii(record: dict[str, Any]) -> bool:
     for key, value in _flatten(record):
         leaf = key.rsplit(".", 1)[-1].casefold()
-        if value in (None, "", [], {}):
+        if value in (None, "", [], {}) or normalize(value) in {
+            "null",
+            "none",
+            "redacted",
+            "[redacted]",
+        }:
             continue
         if any(token in leaf for token in ("email", "phone", "full_name", "requester_name", "email_hash", "display_name")):
             return True
@@ -201,29 +212,102 @@ def _record_time(record: dict[str, Any], fallback):
     return fallback
 
 
+def _as_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    folded = normalize(value)
+    if folded in {"true", "1", "yes", "enabled", "allow", "allowed"}:
+        return True
+    if folded in {"false", "0", "no", "disabled", "deny", "denied"}:
+        return False
+    return None
+
+
+def _structured_line_record(line: str, line_no: int) -> dict[str, Any]:
+    """Parse the structured log dialects used by participant evidence."""
+    record: dict[str, Any] = {}
+    leading_time = ISO_PREFIX_RE.search(line)
+    remainder = line[leading_time.end():].strip() if leading_time else line.strip()
+    if remainder.startswith("{"):
+        try:
+            payload = json.loads(remainder)
+            if isinstance(payload, dict):
+                record.update(payload)
+        except json.JSONDecodeError:
+            pass
+    if not record:
+        record.update(
+            (key, value.strip("\"'")) for key, value in KV_RE.findall(line)
+        )
+        embedded = MESSAGE_RE.search(line)
+        if embedded:
+            message = embedded.group(1).replace('\\"', '"').replace("\\\\", "\\")
+            record.update(
+                (key, value.strip("\"'"))
+                for key, value in KV_RE.findall(message)
+            )
+    parts = [part.strip() for part in line.split("|")]
+    if len(parts) >= 6:
+        record.setdefault("service", parts[2])
+        record.setdefault("trace_id", parts[3])
+        record.setdefault("event", parts[4])
+    record["_line_no"] = line_no
+    if leading_time:
+        record["observed_at"] = leading_time.group(1)
+    return record
+
+
+def _trace_key(line: str, record: dict[str, Any]) -> str:
+    for key in ("trace_id", "requestId", "request_id"):
+        value = str(record.get(key, "")).strip()
+        if value and value.casefold().startswith(("tr-", "rb-")):
+            return value
+    match = TRACE_RE.search(line)
+    return match.group(0) if match else ""
+
+
 def _infer_state(category: str, record: dict[str, Any], text: str = "") -> str:
     result = normalize(record.get("result") or record.get("state") or record.get("status"))
     if result in RESULT_STATE:
         return RESULT_STATE[result]
-    status_code = record.get("status_code")
-    if status_code == 404 or (category == "USER_PROFILE" and "profile" in record and record.get("profile") is None):
+    status_code = str(record.get("status_code") or record.get("http_status") or "")
+    rows = str(record.get("rows", ""))
+    if status_code == "404" or (
+        category == "USER_PROFILE"
+        and (rows == "0" or ("profile" in record and record.get("profile") is None))
+    ):
         return "ABSENT"
-    if status_code == 200:
+    if status_code == "200" or (category == "USER_PROFILE" and rows not in {"", "0"}):
         return "PRESENT"
     if category == "DATA_FLOW":
-        enabled = record.get("enabled")
+        enabled = _as_bool(record.get("enabled"))
         if enabled is not None:
-            return "ACTIVE" if bool(enabled) else "DISABLED"
+            return "ACTIVE" if enabled else "DISABLED"
     if category == "BACKUP_ARCHIVE":
-        allowed = record.get("restore_allowed")
+        decision = normalize(record.get("decision"))
+        if decision in {"deny", "denied", "block", "blocked"}:
+            return "BLOCKED"
+        deletion_block = _as_bool(record.get("deletion_block"))
+        if deletion_block is not None:
+            return "BLOCKED" if deletion_block else "ACTIVE"
+        allowed = _as_bool(record.get("restore_allowed"))
         if allowed is not None:
-            return "ACTIVE" if bool(allowed) else "BLOCKED"
+            return "ACTIVE" if allowed else "BLOCKED"
+        eligible = _as_bool(record.get("eligible"))
+        if eligible is not None:
+            return "ACTIVE" if eligible else "BLOCKED"
     if category == "SEARCH_INDEX_ENTRY":
         if "hits" in record:
             return "PRESENT" if record.get("hits") else "ABSENT"
         if normalize(record.get("result")) in {"hit", "found"}:
             return "PRESENT"
     if category == "ANALYTICS_PROFILE":
+        direct_identifiers = record.get("direct_identifiers")
+        if direct_identifiers is not None:
+            try:
+                return "PRESENT" if int(direct_identifiers) > 0 else "ANONYMIZED"
+            except (TypeError, ValueError):
+                pass
         return "PRESENT" if _has_pii(record) else "ANONYMIZED"
     if category in {"SUPPORT_MESSAGE", "ACCOUNT_TOMBSTONE", "EMAIL_DELIVERY_LOG"}:
         text_has_pii = bool(EMAIL_RE.search(text) or re.search(r"\+?\d[\d\s()\-]{7,}", text))
@@ -248,6 +332,7 @@ class EvidenceIndex:
         self.cache_dir = cache_dir
         self.files = self._load_manifest()
         self.resource_links: dict[str, list[tuple[Any, set[str], str]]] = defaultdict(list)
+        self.resource_aliases: dict[str, list[tuple[str, Any]]] = defaultdict(list)
         self.activity_events: list[dict[str, Any]] = []
         self.observations: list[Observation] = []
         self.observations_by_resource: dict[str, list[Observation]] = defaultdict(list)
@@ -288,6 +373,10 @@ class EvidenceIndex:
                 if subjects:
                     self.resource_links[resource].append(
                         (parse_time(row.get("event_time")), subjects, row.get("activity_id", ""))
+                    )
+                for reference in FILE_REF_RE.findall(details):
+                    self.resource_aliases[normalize(reference)].append(
+                        (resource, parse_time(row.get("event_time")))
                     )
 
     def _extract_all(self) -> None:
@@ -435,9 +524,38 @@ class EvidenceIndex:
     ) -> list[Observation]:
         if not text.strip():
             return []
-        groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        groups: dict[str, list[tuple[int, str, dict[str, Any]]]] = defaultdict(list)
         free_lines: list[str] = []
         result: list[Observation] = []
+
+        def append_observation(
+            record: dict[str, Any],
+            context: str,
+            *,
+            resource_id: str | None = None,
+        ) -> None:
+            resource = canonical_resource(resource_id or record.get("resource_id", ""))
+            if not resource or not RESOURCE_RE.search(resource):
+                return
+            system_id, category = meta_for_text_resource(
+                resource, evidence, record, context
+            )
+            subjects = _subjects(record)
+            subjects.update(normalize(value) for value in EMAIL_RE.findall(context))
+            subjects.update(f"user_{value}" for value in USER_RE.findall(context))
+            result.append(
+                Observation(
+                    system_id=system_id,
+                    resource_id=resource,
+                    category=category,
+                    state=_infer_state(category, record, context),
+                    observed_at=_record_time(record, evidence.captured_at),
+                    evidence_id=evidence.file_id,
+                    subjects=subjects,
+                    attributes=dict(record),
+                )
+            )
+
         for line_no, line in enumerate(text.splitlines(), 1):
             parts = [part.strip().lstrip("- ") for part in line.split("|")]
             if len(parts) >= 6 and RESOURCE_RE.search(parts[2]):
@@ -467,68 +585,55 @@ class EvidenceIndex:
                     )
                 )
                 continue
-            match = re.search(r"\btrace_id=([^\s]+)", line)
-            if match:
-                groups[match.group(1)].append((line_no, line))
-            elif "resource_id=" in line:
-                record = {key: value.strip("\"'") for key, value in KV_RE.findall(line)}
-                record["_line_no"] = line_no
-                leading_time = ISO_PREFIX_RE.search(line)
-                if leading_time:
-                    record["observed_at"] = leading_time.group(1)
-                resource = canonical_resource(record.get("resource_id", ""))
-                if resource:
-                    system_id, category = meta_for_text_resource(
-                        resource, evidence, record, line
-                    )
-                    subjects = _subjects(record)
-                    subjects.update(normalize(v) for v in EMAIL_RE.findall(line))
-                    subjects.update(f"user_{v}" for v in USER_RE.findall(line))
-                    result.append(
-                        Observation(
-                            system_id=system_id,
-                            resource_id=resource,
-                            category=category,
-                            state=_infer_state(category, record, line),
-                            observed_at=_record_time(record, evidence.captured_at),
-                            evidence_id=evidence.file_id,
-                            subjects=subjects,
-                            attributes=record,
-                        )
-                    )
+            record = _structured_line_record(line, line_no)
+            trace = _trace_key(line, record)
+            if trace:
+                groups[trace].append((line_no, line, record))
+            elif record.get("resource_id"):
+                append_observation(record, line)
             else:
                 free_lines.append(line)
         for entries in groups.values():
-            lines = [line for _line_no, line in entries]
+            lines = [line for _line_no, line, _record in entries]
             merged = " ".join(lines)
-            record = {key: value.strip("\"'") for key, value in KV_RE.findall(merged)}
-            record["_line_no"] = min(line_no for line_no, _line in entries)
-            leading_time = ISO_PREFIX_RE.search(lines[0])
-            if leading_time:
-                record["observed_at"] = leading_time.group(1)
-            explicit_resource = record.get("resource_id", "")
-            resources = {canonical_resource(explicit_resource)} if explicit_resource else set()
+            record: dict[str, Any] = {}
+            resources: dict[str, Any] = {}
+            for line_no, _line, line_record in entries:
+                record.update(line_record)
+                explicit_resource = canonical_resource(
+                    str(line_record.get("resource_id", ""))
+                )
+                if explicit_resource and RESOURCE_RE.search(explicit_resource):
+                    resources[explicit_resource] = _record_time(
+                        line_record, evidence.captured_at
+                    )
             if not resources:
                 continue
+            record["_line_no"] = min(line_no for line_no, _line, _record in entries)
             subjects = _subjects(record)
             subjects.update(normalize(v) for v in EMAIL_RE.findall(merged))
             subjects.update(f"user_{v}" for v in USER_RE.findall(merged))
-            for resource in resources:
-                system_id, category = meta_for_text_resource(
-                    resource, evidence, record, merged
-                )
-                result.append(
-                    Observation(
-                        system_id=system_id,
-                        resource_id=resource,
-                        category=category,
-                        state=_infer_state(category, record, merged),
-                        observed_at=_record_time(record, evidence.captured_at),
-                        evidence_id=evidence.file_id,
-                        subjects=set(subjects),
-                        attributes=record,
-                    )
-                )
+            for resource, observed_at in resources.items():
+                resource_record = dict(record)
+                resource_record["resource_id"] = resource
+                resource_record["observed_at"] = observed_at.isoformat()
+                before = len(result)
+                append_observation(resource_record, merged, resource_id=resource)
+                if len(result) > before:
+                    result[-1].subjects = set(subjects)
+
+        folded_text = normalize(text)
+        for reference, links in self.resource_aliases.items():
+            if reference not in folded_text:
+                continue
+            for resource, linked_at in links:
+                alias_record = {
+                    "resource_id": resource,
+                    "file_reference": reference,
+                    "inference": "catalog_file_alias",
+                    "observed_at": max(evidence.captured_at, linked_at).isoformat(),
+                }
+                append_observation(alias_record, reference, resource_id=resource)
         if not allow_freeform:
             return result
 

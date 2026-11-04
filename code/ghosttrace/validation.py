@@ -70,8 +70,17 @@ def validate_output(output_path: Path, request_path: Path) -> dict[str, Any]:
             continue
         if status == "NOT_APPLICABLE" and steps:
             errors.append(f"{case_id}: NOT_APPLICABLE must have []")
+        if status == "COMPLETE" and not steps:
+            errors.append(f"{case_id}: COMPLETE lacks evidence-backed verification")
         if status == "COMPLETE" and any(step.get("phase") != "VERIFICATION" for step in steps):
             errors.append(f"{case_id}: COMPLETE contains non-verification steps")
+        if status == "INCOMPLETE":
+            phases = {step.get("phase") for step in steps}
+            missing_phases = {"FINDING", "REMEDIATION", "VERIFICATION"} - phases
+            if missing_phases:
+                errors.append(
+                    f"{case_id}: INCOMPLETE plan lacks phases {sorted(missing_phases)}"
+                )
         keys = []
         for index, step in enumerate(steps, 1):
             if set(step) != FIELDS:

@@ -9,6 +9,7 @@ from .domain import Case, Decision, Observation, Step, latest_by_resource, parse
 from .evidence import EvidenceIndex
 from .identity import IdentityIndex
 from .intent import authorizes_deletion
+from .policy import PolicyIndex
 from .workflow import WorkflowAttributor
 
 
@@ -31,39 +32,11 @@ OPERATION_ORDER = {
     "VERIFY_RESTORE_BLOCKED": 5,
 }
 
-ACTION_BY_CATEGORY = {
-    "USER_PROFILE": "DELETE",
-    "SECONDARY_IDENTIFIER": "DELETE",
-    "SEARCH_INDEX_ENTRY": "DELETE",
-    "CACHE_ENTRY": "DELETE",
-    "SUPPORT_MESSAGE": "REDACT",
-    "SUPPORT_ATTACHMENT": "DELETE",
-    "ANALYTICS_PROFILE": "ANONYMIZE",
-    "PRODUCT_TELEMETRY": "ANONYMIZE",
-    "USER_EXPORT": "DELETE",
-    "MARKETING_PROFILE": "DELETE",
-    "EMAIL_DELIVERY_LOG": "REDACT",
-    "SECURITY_AUDIT_LOG": "RETAIN",
-    "LEGAL_HOLD_RECORD": "RETAIN",
-    "BACKUP_ARCHIVE": "BLOCK_RESTORE",
-    "ACCOUNT_TOMBSTONE": "REDACT",
-    "DATA_FLOW": "DISABLE_DATA_FLOW",
-}
-
-TARGET_STATE = {
-    "DELETE": "ABSENT",
-    "REDACT": "REDACTED",
-    "ANONYMIZE": "ANONYMIZED",
-    "RETAIN": "PRESENT",
-    "BLOCK_RESTORE": "BLOCKED",
-    "DISABLE_DATA_FLOW": "DISABLED",
-}
-
-
 class GhostTraceEngine:
     def __init__(self, dataset_dir: Path, cache_dir: Path | None = None):
         self.dataset_dir = dataset_dir.resolve()
         self.identities = IdentityIndex(self.dataset_dir)
+        self.policy = PolicyIndex(self.dataset_dir)
         self.evidence = EvidenceIndex(self.dataset_dir, cache_dir=cache_dir)
         self.cases = self._load_cases(self.dataset_dir / "deletion_requests.csv")
         context_cases = list(self.cases)
@@ -113,6 +86,10 @@ class GhostTraceEngine:
             observation
             for observation in self.evidence.eligible(case.audit_at)
             if self.evidence.matches(observation, aliases, case.audit_at)
+            and not (
+                observation.attributes.get("inference") == "catalog_file_alias"
+                and observation.observed_at < case.requested_at
+            )
         ]
         workflow_account = self.workflow.account_resource(
             case
@@ -131,7 +108,9 @@ class GhostTraceEngine:
         ):
             observations.append(anonymization_proof)
         observations = latest_by_resource(observations)
-        observations = [item for item in observations if item.category in ACTION_BY_CATEGORY]
+        observations = [
+            item for item in observations if self.policy.supports(item.category)
+        ]
 
         # Prefer state evidence close to the audit cutoff while retaining one
         # authoritative state per resource. Resource history is still available
@@ -171,10 +150,8 @@ class GhostTraceEngine:
             warnings=warnings,
         )
 
-    @staticmethod
-    def _compliant(observation: Observation) -> bool:
-        action = ACTION_BY_CATEGORY[observation.category]
-        return observation.state == TARGET_STATE[action]
+    def _compliant(self, observation: Observation) -> bool:
+        return observation.state == self.policy.target_state(observation)
 
     def _steps(
         self,
@@ -187,7 +164,7 @@ class GhostTraceEngine:
             for observation in observations:
                 if self._compliant(observation):
                     continue
-                action = ACTION_BY_CATEGORY[observation.category]
+                action = self.policy.action_for(observation)
                 if action == "DELETE":
                     finding = ("REPORT_REMAINING_RECORD", "PRESENT")
                     remediation = ("DELETE_RECORD", "ABSENT")
@@ -210,7 +187,7 @@ class GhostTraceEngine:
             *(planned_verifications or []),
         ]
         for observation in verification_observations:
-            action = ACTION_BY_CATEGORY[observation.category]
+            action = self.policy.action_for(observation)
             operation = {
                 "DELETE": "VERIFY_RECORD_ABSENT",
                 "RETAIN": "VERIFY_RECORD_PRESENT",
@@ -220,7 +197,14 @@ class GhostTraceEngine:
                 "BLOCK_RESTORE": "VERIFY_RESTORE_BLOCKED",
             }[action]
             evidence_id = observation.evidence_id if status == "COMPLETE" else ""
-            raw.append(("VERIFICATION", observation.system_id, observation.resource_id, operation, TARGET_STATE[action], evidence_id))
+            raw.append((
+                "VERIFICATION",
+                observation.system_id,
+                observation.resource_id,
+                operation,
+                self.policy.target_state(observation),
+                evidence_id,
+            ))
 
         raw.sort(key=lambda item: (PHASE_ORDER[item[0]], OPERATION_ORDER[item[3]], item[1], item[2]))
         return [
@@ -232,6 +216,7 @@ class GhostTraceEngine:
         return {
             "cases": len(self.cases),
             "identities": len(self.identities.identities),
+            "policy_rules": len(self.policy.rules),
             "evidence_files": len(self.evidence.files),
             "observations": len(self.evidence.observations),
             "extraction_warnings": list(self.evidence.extraction_warnings),
