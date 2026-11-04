@@ -4,6 +4,18 @@ GhostTrace is an evidence-grounded deletion-audit system for the HackerRank Orch
 
 The submission is a complete local application: a deterministic audit engine, multi-format evidence pipeline, strict output validator, evaluation harness, submission packager, and a responsive investigation workstation inspired by DepthWizard and VeilGraph's restrained scientific design language.
 
+## Download the verified submission
+
+Judges and reviewers can download the frozen submission directly from the public [`submission-v1.0.0` GitHub Release](https://github.com/CodeBluze/GhostTrace/releases/tag/submission-v1.0.0). No GitHub sign-in or repository clone is required.
+
+| Required artifact | One-click download | Purpose |
+| --- | --- | --- |
+| `code.zip` | **[Download runnable solution](https://github.com/CodeBluze/GhostTrace/releases/download/submission-v1.0.0/code.zip)** | Code, prompts, configuration, README, and both required evaluation reports |
+| `output.csv` | **[Download 518-row prediction file](https://github.com/CodeBluze/GhostTrace/releases/download/submission-v1.0.0/output.csv)** | Final answers, sorted by `case_id` |
+| `log.txt` | **[Download AI chat transcript](https://github.com/CodeBluze/GhostTrace/releases/download/submission-v1.0.0/log.txt)** | Required development conversation log |
+
+GitHub is a convenient mirror for reviewers. The official submission must still be uploaded through the [HackerRank challenge page](https://www.hackerrank.com/contests/hackerrank-orchestrate-october26/challenges/ghost-data-still-exists).
+
 ## What ships
 
 - **518-case batch auditor** with exact CSV/JSON contract enforcement.
@@ -151,8 +163,10 @@ code/
 
 See [`problem_statement.md`](problem_statement.md) for the official participant contract and [`WINNING_STRATEGY.md`](WINNING_STRATEGY.md) for the verified forensic strategy.
 
-## Submission
+## Submission and verification
 
-Build `code.zip` with `python3 code/package_submission.py`, submit the root `output.csv`, and upload `log.txt` as the chat transcript. The archive includes the required reports at the exact paths `evaluation/evaluation_report.md` and `evaluation/usage_report.md`; their source-of-truth copies remain beside the evaluator under `code/evaluation/`. The challenge submission page is:
+Build `code.zip` with `python3 code/package_submission.py`, submit the root `output.csv`, and upload `log.txt` as the chat transcript. The archive includes the required reports at the exact paths `evaluation/evaluation_report.md` and `evaluation/usage_report.md`; their source-of-truth copies remain beside the evaluator under `code/evaluation/`.
+
+For reproducibility, compare downloaded files with the SHA-256 checksums published in the [`submission-v1.0.0` release notes](https://github.com/CodeBluze/GhostTrace/releases/tag/submission-v1.0.0). The authoritative upload destination is:
 
 https://www.hackerrank.com/contests/hackerrank-orchestrate-october26/challenges/ghost-data-still-exists
