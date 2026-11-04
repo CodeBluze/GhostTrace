@@ -1,159 +1,152 @@
 # GhostTrace
 
-## HackerRank Orchestrate — Ghost Data Still Exists
+GhostTrace is an evidence-grounded deletion-audit system for the HackerRank Orchestrate challenge **Ghost Data Still Exists**. It reconstructs historical identities, reads heterogeneous evidence, enforces the case-specific time cutoff, applies deletion policy, and emits a validated remediation plan for every request.
 
-GhostTrace is an AI deletion auditor that resolves historical identities, traces personal data across systems, detects surviving copies and restore risks, and returns evidence-backed verdicts with ordered remediation and verification steps.
+The submission is a complete local application: a deterministic audit engine, multi-format evidence pipeline, strict output validator, evaluation harness, submission packager, and a responsive investigation workstation inspired by DepthWizard and VeilGraph's restrained scientific design language.
 
-Build an AI agent that audits whether a user's personal data was actually deleted.
+## What ships
 
-A deletion workflow may report **Complete** while data still exists in databases, logs, support attachments, exports, search indexes, archives, or backups. Sync and restore processes may also bring deleted data back.
+- **518-case batch auditor** with exact CSV/JSON contract enforcement.
+- **Historical identity graph** across current identity data and audit-log mutations.
+- **Evidence adapters** for JSON, SQLite-compatible SQL, structured logs, text, PDFs, and screenshots.
+- **Temporal safety** at both evidence-capture and activity-link levels; post-`audit_at` data cannot influence a verdict.
+- **Policy planner** for delete, redact, anonymize, retain, block-restore, and disable-flow actions.
+- **Fail-closed uncertainty**: missing subject-linked proof produces `INCOMPLETE` with a warning instead of an invented `COMPLETE` verdict.
+- **Investigation UI** with search, status filters, case drill-down, evidence lineage, ordered plan, responsive layout, theme support, and keyboard-aware controls.
+- **Zero-runtime-model architecture**: reproducible predictions, no network dependency, no API key, and no per-request inference cost.
 
-For each request, the agent must first determine whether deletion was actually requested. It then returns `COMPLETE`, `INCOMPLETE`, or `NOT_APPLICABLE`, reports any remaining data or recreation risk, and produces the ordered remediation and verification steps required to finish an authorized deletion safely.
+## Architecture
 
-Read [`problem_statement.md`](./problem_statement.md) for the complete challenge contract.
-
----
-
-## Quick Start
-
-Clone the repository and move into the project directory:
-
-```bash
-git clone https://github.com/interviewstreet/hackerrank-orchestrate-october26.git
-cd hackerrank-orchestrate-october26
+```text
+deletion_requests ── intent gate ── historical identity resolver
+                                           │
+evidence manifest ── format adapters ── temporal evidence index
+                                           │
+system activity ── cutoff-safe resource/subject links
+                                           │
+deletion_rules ─────────────── policy reducer + state planner
+                                           │
+                           strict validator ── output.csv
+                                           │
+                           investigation API + workstation UI
 ```
 
-Start your AI coding tool from the **repository root** so it automatically reads [`AGENTS.md`](./AGENTS.md) and logs your session turns to `log.txt` in the root directory.
+The workflow's reported status is treated as a claim, never proof. GhostTrace decides from participant-visible state evidence captured at or before the audit cutoff.
 
-Build your solution in `code/main.py`, or use another language and document its setup and run command clearly in your README.
+## Requirements
 
-Your solution must:
+- Python 3.11 or later.
+- No Python package installation is required.
+- Optional but recommended system tools:
+  - `pdftotext` (Poppler) for PDF evidence.
+  - `tesseract` for screenshot evidence.
 
-- Read the input files from `dataset/`
-- Generate one prediction row for every request in `dataset/deletion_requests.csv`
-- Write the final predictions to `output.csv` in the repository root
+When an optional extractor is unavailable, GhostTrace completes the run, surfaces the missing adapter in diagnostics, and never silently fabricates observations.
 
-Run the starter Python entry point with:
+## Run the production audit
+
+From the repository root:
 
 ```bash
-python3 code/main.py
+python3 code/main.py run
+python3 code/main.py validate
 ```
 
-The blank template at `dataset/output.csv` is provided as a reference. Your final generated file for submission must be the root-level `output.csv`.
+This writes `output.csv` in the repository root and validates all 518 rows, statuses, step schemas, evidence rules, numbering, and canonical ordering before reporting success.
 
+Useful commands:
 
-## Dataset
+```bash
+# Inspect extraction coverage and warnings
+python3 code/main.py diagnostics
 
-All participant-facing files are in `dataset/`:
+# Run the investigation workstation
+python3 code/main.py serve --host 127.0.0.1 --port 8787
 
-| File | Contents |
-| --- | --- |
-| `deletion_requests.csv` | 518 requests |
-| `sample_deletion_requests.csv` | 32 sample requests |
-| `sample_output.csv` | Correct sample answers |
-| `user_identities.csv` | Current user identities |
-| `user_audit_log.csv` | Historical identity changes |
-| `system_activity.csv` | Activity across services and data processes |
-| `deletion_rules.csv` | Required treatment for each data category |
-| `evidence_files.csv` | Manifest of supplied evidence files |
-| `output.csv` | Blank output template |
+# Run the complete regression suite
+python3 -m unittest discover -s code/tests -v
 
-Evidence is stored under `dataset/evidence/` and may include PDFs, images, logs, JSON, plain text, or SQL snapshot exports. SQL captures may contain a primary database, regional replicas, a reporting replica, or a failover replica so replication drift can be investigated directly. The `.sql` files are readable as text and executable with SQLite.
+# Evaluate against the participant-visible sample
+python3 code/evaluation/main.py
 
-Only `deletion_requests.csv` requires answers. The other files provide evidence and context.
+# Build the dataset-free submission archive
+python3 code/package_submission.py
+```
 
----
+Then open [http://127.0.0.1:8787](http://127.0.0.1:8787). The UI and API are served by the Python standard library; no frontend toolchain or separate service is required.
 
-## Output
+## Decision pipeline
 
-Create `output.csv` with these columns in this exact order:
+1. **Intent:** multilingual deletion language is accepted; correction, export-only, marketing-only, and explicit non-deletion requests are rejected as `NOT_APPLICABLE`.
+2. **Identity:** the request email is resolved to one stable user, including historical email and phone aliases valid for the request timeline.
+3. **Evidence:** structured sources are parsed semantically; PDFs and images use local extraction with a content-addressable text cache.
+4. **Time:** both evidence captures and resource-to-subject activity links must exist at or before `audit_at`.
+5. **State:** the latest eligible observation per system/resource is selected.
+6. **Policy:** the required terminal state is derived by category.
+7. **Plan:** violations generate canonically ordered findings, remediation, and verification; compliant cases generate evidence-backed verification only.
+8. **Validation:** output is rejected if it violates any part of the challenge contract.
+
+## Output contract
 
 ```text
 case_id,deletion_status,steps_json
 ```
 
-Produce exactly one row per request. `deletion_status` is `COMPLETE`, `INCOMPLETE`, or `NOT_APPLICABLE`. `steps_json` is an ordered JSON array containing findings, remediation actions, and verification checks. Use an empty array (`[]`) for `NOT_APPLICABLE`. Evidence references may be a `file_id`, `activity_id`, or `audit_id`. Determine the resource state at `audit_at` from the available evidence; reported workflow statuses and operation results are claims. Use `dataset/sample_output.csv` as the format reference.
+- Exactly one canonically sorted row per request.
+- Status is `COMPLETE`, `INCOMPLETE`, or `NOT_APPLICABLE`.
+- `NOT_APPLICABLE` always has `[]`.
+- `COMPLETE` contains only evidence-backed verification steps.
+- `INCOMPLETE` findings cite evidence; proposed remediation and future verification deliberately use an empty `evidence_id`.
+- Every step contains exactly the seven required fields and uses the specified phase and operation ordering.
 
-The final file must contain 518 data rows sorted by `case_id` (plus the header row). The grader parses `steps_json` as JSON, so object-key order and whitespace do not matter; array order does. Order findings, remediation, and verification in that phase order. Within a phase, follow the operation order in the problem statement, then sort by `system_id` and `resource_id`.
+## Evaluation snapshot
 
----
+On the 32 participant-visible labeled cases:
 
-## Evaluation
+| Metric | Result |
+| --- | ---: |
+| Case status accuracy | 90.625% |
+| Exact row / exact sequence accuracy | 18.750% |
+| Step-field accuracy | 66.062% |
+| Step precision | 62.346% |
+| Step recall | 52.332% |
 
-`output.csv` will be compared with hidden canonical answers. Scoring considers:
+The three status misses are deliberately fail-closed cases where the visible evidence does not provide a subject-to-resource link. GhostTrace does not use the public labels as prediction shortcuts. Full methodology and limitations are documented in [`code/evaluation/evaluation_report.md`](code/evaluation/evaluation_report.md).
 
-- deletion assessment accuracy;
-- current and historical identity resolution;
-- discovery of remaining data and recreation risks;
-- correct policy application and evidence references; and
-- completeness and ordering of remediation and verification steps.
+The final full-data run currently produces 142 `COMPLETE`, 366 `INCOMPLETE`, and 10 `NOT_APPLICABLE` decisions. Its `output.csv` passes the strict validator with 518/518 rows. Step count is bounded after parser hardening (median 5, 95th percentile 12, maximum 14), preventing service instance IDs from being promoted to user resources.
 
-Your `code.zip` must include:
+## Security and privacy posture
+
+- Binds to loopback by default.
+- Emits no case identifiers or PII to HTTP access logs.
+- Uses no telemetry, remote model, analytics SDK, cookie, or third-party asset.
+- Stores only local extracted-text cache entries, excluded from version control and submission.
+- Resolves static paths before serving to prevent traversal.
+- Never trusts workflow completion claims as evidence.
+
+## Repository guide
 
 ```text
-code/evaluation/evaluation_report.md
-code/evaluation/usage_report.md
+code/
+├── main.py                  CLI and batch entry point
+├── package_submission.py    deterministic archive builder
+├── ghosttrace/
+│   ├── domain.py            typed domain model
+│   ├── identity.py          temporal identity resolution
+│   ├── intent.py            multilingual intent gate
+│   ├── evidence.py          multi-format evidence adapters/index
+│   ├── engine.py            policy reducer and plan generator
+│   ├── validation.py        strict output contract validator
+│   └── server.py            local investigation API/server
+├── ui/                      production workstation
+├── tests/                   regression and safety gates
+└── evaluation/              evaluator and required reports
 ```
 
-- `evaluation_report.md` must cover case, row, field, and sequence accuracy, at least three additional evaluation cases created by you, failures found, and improvements made.
-- `usage_report.md` must cover the final full-dataset run, including model providers and names, model calls, input and output tokens, total and average tokens per request, and estimated total and per-request cost. Include per-model and overall totals when using multiple models.
+See [`problem_statement.md`](problem_statement.md) for the official participant contract and [`WINNING_STRATEGY.md`](WINNING_STRATEGY.md) for the verified forensic strategy.
 
-**Important:** Place `evaluation_report.md` and `usage_report.md` inside `code/evaluation/` (matching `code/evaluation/main.py` in this starter layout), write your complete evaluation metrics, custom evaluation test cases, and token/cost breakdowns directly inside those Markdown files, and keep prompts in source code or Markdown files. Automated code evaluation ignores raw data files (`.csv`, `.tsv`, `.json`, `.jsonl`, `.sql`, `.log`), so content stored only in those formats will not be visible to the code judge or AI interviewer.
+## Submission
 
----
+Build `code.zip` with `python3 code/package_submission.py`, submit the root `output.csv`, and upload `log.txt` as the chat transcript. The challenge submission page is:
 
-## Chat Transcript
-
-This repository includes [`AGENTS.md`](./AGENTS.md), which instructs compatible AI coding tools to append conversation summaries to `log.txt` in the repository root:
-
-| Platform | Path |
-| --- | --- |
-| macOS / Linux | `<repo root>/log.txt` |
-| Windows | `<repo root>\log.txt` |
-
-- Always launch your AI coding agent from the repository root (or explicitly ask it to read `./AGENTS.md` first) so every turn is logged to `log.txt` with the required `User Prompt`, `Agent Response Summary`, `Actions`, and `Context` sections.
-- Upload `log.txt` directly as your `chat_transcript` submission on HackerRank.
-- Do not include API keys, tokens, credentials, or secrets in prompts, code, configuration, or `log.txt`.
-
----
-
-## Packaging `code.zip` and Submission
-
-| Item | Description |
-| --- | --- |
-| `code.zip` | Runnable solution, prompts, configuration, `README.md`, and `evaluation/` reports |
-| `output.csv` | One answer row for each of the 518 requests in `dataset/deletion_requests.csv` |
-| `chat_transcript` | The root `log.txt` file generated by your coding agent |
-| AI interview | Live explanation of your architecture, approach, and evaluation |
-
-You may use any programming language, model, framework, or retrieval approach. Include clear setup and execution instructions in `README.md` inside `code.zip`.
-
-To package `code.zip` from the repository root without bundling the dataset:
-
-**macOS / Linux:**
-
-```bash
-zip -r code.zip README.md code -x "*/__pycache__/*" "*/.venv/*" "*/venv/*" "*/node_modules/*" "*/.git/*" "*/.DS_Store"
-```
-
-**Windows (PowerShell):**
-
-```powershell
-Compress-Archive -Path README.md, code -DestinationPath code.zip -Force
-```
-
-When packaging `code.zip`:
-
-- Keep your evaluation reports in `code/evaluation/` so they are bundled automatically with `code` (or add `evaluation` to the archive command above if you placed them in a top-level `evaluation/` directory).
-- Do **not** include `dataset/`, virtual environments (`.venv`, `venv`, `node_modules`), or build caches (`__pycache__`). On Windows, keep `.venv` at the repository root (outside `code/`) and remove any `code/__pycache__` folders before running `Compress-Archive`.
-- Do **not** include nested archives (`.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar`) inside `code.zip` — submissions containing nested archive files will be rejected.
-
-Before submitting, confirm that:
-
-- `output.csv` has the exact header `case_id,deletion_status,steps_json` and contains all 518 data rows sorted by `case_id`;
-- every `steps_json` value is a valid JSON array with consecutive step numbers starting at `1`;
-- findings cite valid evidence IDs, and `COMPLETE` verification steps cite evidence proving the current state;
-- proposed remediation and future verification steps use an empty `evidence_id` (`""`);
-- `code.zip` includes your runnable code, `README.md`, `code/evaluation/evaluation_report.md`, and `code/evaluation/usage_report.md`;
-- `log.txt` follows the `AGENTS.md` turn format and is uploaded to the `chat_transcript` slot; and
-- no API keys, credentials, real personal data, or sensitive configuration values are included.
+https://www.hackerrank.com/contests/hackerrank-orchestrate-october26/challenges/ghost-data-still-exists
