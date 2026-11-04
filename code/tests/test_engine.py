@@ -14,9 +14,10 @@ import sys
 
 sys.path.insert(0, str(CODE_DIR))
 
-from ghosttrace.domain import parse_time  # noqa: E402
+from ghosttrace.domain import Observation, parse_time  # noqa: E402
 from ghosttrace.engine import GhostTraceEngine, OPERATION_ORDER, PHASE_ORDER  # noqa: E402
 from ghosttrace.intent import authorizes_deletion  # noqa: E402
+from ghosttrace.policy import PolicyIndex  # noqa: E402
 from ghosttrace.validation import validate_output  # noqa: E402
 from ghosttrace.workflow import RESULT_FOR_STATUS  # noqa: E402
 from main import write_output  # noqa: E402
@@ -40,6 +41,63 @@ class GhostTraceEngineTests(unittest.TestCase):
         ]
         self.assertEqual(missing, [])
         self.assertEqual(self.engine.evidence.extraction_warnings, [])
+
+    def test_every_authorized_case_has_an_evidence_grounded_plan(self) -> None:
+        decisions = self.engine.audit_all()
+        empty = [
+            decision.case_id
+            for decision in decisions
+            if decision.deletion_status != "NOT_APPLICABLE" and not decision.steps
+        ]
+        self.assertEqual(empty, [])
+        self.assertEqual(
+            [decision.case_id for decision in decisions if decision.warnings],
+            [],
+        )
+
+    def test_structured_log_dialects_preserve_trace_ownership(self) -> None:
+        expected = {
+            "case_265": ("account_5015", "evidence_25", "ABSENT"),
+            "case_363": ("account_9205", "evidence_34", "ABSENT"),
+            "case_416": ("account_3075", "evidence_39", "ABSENT"),
+            "case_521": ("account_1482", "evidence_48", "ABSENT"),
+        }
+        cases = {case.case_id: case for case in self.engine.cases}
+        for case_id, (resource_id, evidence_id, state) in expected.items():
+            case = cases[case_id]
+            identity = self.engine.identities.resolve(case)
+            aliases = self.engine.identities.aliases_at(identity, case)
+            matching = [
+                item
+                for item in self.engine.evidence.eligible(case.audit_at)
+                if item.resource_id == resource_id
+                and item.evidence_id == evidence_id
+                and self.engine.evidence.matches(item, aliases, case.audit_at)
+            ]
+            self.assertEqual(len(matching), 1, case_id)
+            self.assertEqual(matching[0].state, state, case_id)
+
+    def test_catalog_file_alias_joins_object_storage_evidence(self) -> None:
+        case = next(item for item in self.engine.cases if item.case_id == "case_61")
+        decision = self.engine.audit(case)
+        finding = [
+            step
+            for step in decision.steps
+            if step.resource_id == "object_19" and step.phase == "FINDING"
+        ]
+        self.assertEqual(len(finding), 1)
+        self.assertEqual(finding[0].evidence_id, "evidence_46")
+
+    def test_catalog_file_alias_is_not_reused_for_a_later_request(self) -> None:
+        case = next(
+            item
+            for item in self.engine._load_cases(
+                self.dataset / "sample_deletion_requests.csv"
+            )
+            if item.case_id == "case_07"
+        )
+        decision = self.engine.audit(case)
+        self.assertNotIn("object_19", {step.resource_id for step in decision.steps})
 
     def test_intent_gate_matches_known_non_deletion_requests(self) -> None:
         not_applicable = {f"case_{number}" for number in range(533, 543)}
@@ -248,6 +306,31 @@ class GhostTraceEngineTests(unittest.TestCase):
                 any("unknown evidence_id" in error for error in validation["errors"])
             )
 
+    def test_validator_rejects_incomplete_without_a_complete_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "output.csv"
+            write_output(self.engine, output)
+            with output.open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            target = next(
+                row for row in rows if row["deletion_status"] == "INCOMPLETE"
+            )
+            target["steps_json"] = "[]"
+            with output.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=["case_id", "deletion_status", "steps_json"],
+                )
+                writer.writeheader()
+                writer.writerows(rows)
+            validation = validate_output(
+                output, self.dataset / "deletion_requests.csv"
+            )
+            self.assertFalse(validation["valid"])
+            self.assertTrue(
+                any("INCOMPLETE plan lacks phases" in error for error in validation["errors"])
+            )
+
     def test_steps_are_canonically_sorted(self) -> None:
         for decision in self.engine.audit_all():
             keys = [
@@ -283,6 +366,66 @@ class IntentTests(unittest.TestCase):
             "Remove me from marketing lists only.",
         ]
         self.assertTrue(all(not authorizes_deletion(text) for text in examples))
+
+
+class PolicyTests(unittest.TestCase):
+    def test_policy_actions_are_loaded_from_the_supplied_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "deletion_rules.csv"
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=(
+                        "rule_id",
+                        "data_category",
+                        "condition",
+                        "required_action",
+                    ),
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "rule_id": "test_rule",
+                        "data_category": "USER_PROFILE",
+                        "condition": "Always",
+                        "required_action": "REDACT",
+                    }
+                )
+            policy = PolicyIndex(Path(temp_dir))
+            observation = Observation(
+                system_id="account_service",
+                resource_id="account_test",
+                category="USER_PROFILE",
+                state="PRESENT",
+                observed_at=parse_time("2026-01-01T00:00:00Z"),
+                evidence_id="evidence_test",
+            )
+            self.assertEqual(policy.action_for(observation), "REDACT")
+            self.assertEqual(policy.target_state(observation), "REDACTED")
+
+    def test_retained_backup_uses_restore_control_when_active(self) -> None:
+        policy = PolicyIndex(REPO_ROOT / "dataset")
+        self.assertEqual(
+            policy.rules["BACKUP_ARCHIVE"]["required_action"], "RETAIN"
+        )
+        active = Observation(
+            system_id="backup_service",
+            resource_id="backup_test",
+            category="BACKUP_ARCHIVE",
+            state="ACTIVE",
+            observed_at=parse_time("2026-01-01T00:00:00Z"),
+            evidence_id="evidence_test",
+        )
+        blocked = Observation(
+            system_id=active.system_id,
+            resource_id=active.resource_id,
+            category=active.category,
+            state="BLOCKED",
+            observed_at=active.observed_at,
+            evidence_id=active.evidence_id,
+        )
+        self.assertEqual(policy.action_for(active), "BLOCK_RESTORE")
+        self.assertEqual(policy.target_state(blocked), "BLOCKED")
 
 
 if __name__ == "__main__":

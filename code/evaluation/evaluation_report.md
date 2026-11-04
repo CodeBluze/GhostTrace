@@ -10,7 +10,7 @@ Command:
 python3 code/evaluation/main.py
 ```
 
-Environment: Python 3.14.0, deterministic local execution, 32 public sample cases, 518 full-dataset cases, 94 evidence files, and 2,903 extracted observations. Extraction completed with zero adapter warnings in the measured environment.
+Environment: Python 3.14.6, deterministic local execution, 32 public sample cases, 518 full-dataset cases, 94 evidence files, and 2,984 extracted observations. Extraction completed with zero adapter warnings in the measured environment.
 
 ## Public-sample metrics
 
@@ -37,7 +37,7 @@ The production command emitted 518/518 canonically sorted rows and passed every 
 - Empty evidence IDs on future remediation/verification.
 - Canonical phase, operation, system, and resource ordering.
 
-Plan-size distribution after parser hardening: median 5 steps, 95th percentile 12, maximum 14. No plan exceeds 20 steps.
+Plan-size distribution after parser hardening: median 6 steps, 95th percentile 13, maximum 14. No plan exceeds 20 steps, and every authorized case contains a non-empty status-appropriate plan.
 
 ## Additional evaluation cases
 
@@ -77,6 +77,10 @@ Generate the entire 518-row file in a temporary directory and run the strict val
 10. **Evidence integrity.** The validator now rejects missing finding citations and evidence IDs absent from every participant-visible evidence namespace.
 11. **Anonymous batch attribution.** Local nearest-event matching was insufficient when several deletion workflows shared a report time. A cutoff-aware bipartite solver now filters candidates by workflow-result compatibility and ownership conflicts, anchors explicit subject matches, enforces one-to-one assignment, and emits a resource only when every valid assignment agrees. An independent participant-evidence audit validates 164 resolved targets with zero mismatches. Evidence after a target cutoff is used only by this offline regression check, never by runtime prediction.
 12. **Source event-time reconstruction.** Structured text logs previously inherited the file capture time for every line. Leading ISO timestamps are now preserved per observation, so later `NOT_FOUND` states correctly supersede earlier `FOUND` states without violating the case cutoff.
+13. **Multi-dialect trace loss.** Structured JSON lines, cloud-runtime envelopes, RFC-style syslog, and pipe-delimited operations streams placed subject and resource state on different lines under a shared trace identifier. The previous parser recognized only `trace_id=` syntax and left 15 authorized cases without plans. The trace correlator now parses all supplied dialects, preserves terminal resource timestamps, and reduces empty authorized plans from 15 to zero. Against the preceding release, this reconstructs 158 additional contract steps across 53 full-data rows while retaining the public verdict gate.
+14. **Static policy duplication.** Required actions were previously mirrored in source code. The runtime now loads and validates `deletion_rules.csv`; only operational interpretations absent from its action vocabulary—disabling active flows and blocking an unsafe restore while retaining the archive—are derived by the policy interpreter.
+15. **Catalog-to-artifact reconciliation.** Object-storage screenshots expose filenames while the data catalog exposes stable resource IDs. A time-scoped filename alias join now connects those two participant-visible facts, recovering `object_19` for case 61 without deriving an identifier from naming coincidence alone.
+16. **Incomplete-plan validation.** The validator now rejects empty or phase-incomplete `INCOMPLETE` plans and empty `COMPLETE` verification arrays. This makes the brief's status-specific content requirement an executable release gate.
 
 ## Remaining limitations
 
@@ -93,4 +97,4 @@ python3 code/main.py run
 python3 code/main.py validate
 ```
 
-Final regression result: **21/21 tests pass**. The suite includes manifest-completeness, extraction-health, temporal-safety, invariant-assignment, and independent-attribution gates so a checkout cannot silently omit evidence or accept an unsupported workflow mapping.
+Final regression result: **28/28 tests pass**. The suite includes manifest-completeness, extraction-health, temporal-safety, trace-dialect, dynamic-policy, full-plan, alias-validity, invariant-assignment, and independent-attribution gates so a checkout cannot silently omit evidence or accept an unsupported mapping.
