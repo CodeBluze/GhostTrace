@@ -14,9 +14,11 @@ import sys
 
 sys.path.insert(0, str(CODE_DIR))
 
+from ghosttrace.domain import parse_time  # noqa: E402
 from ghosttrace.engine import GhostTraceEngine, OPERATION_ORDER, PHASE_ORDER  # noqa: E402
 from ghosttrace.intent import authorizes_deletion  # noqa: E402
 from ghosttrace.validation import validate_output  # noqa: E402
+from ghosttrace.workflow import RESULT_FOR_STATUS  # noqa: E402
 from main import write_output  # noqa: E402
 
 
@@ -106,6 +108,86 @@ class GhostTraceEngineTests(unittest.TestCase):
             self.assertEqual(len(matching), 1)
             self.assertEqual(matching[0].operation, "VERIFY_RECORD_ABSENT")
             self.assertEqual(matching[0].evidence_id, "")
+
+    def test_batch_workflow_solver_resolves_only_invariant_targets(self) -> None:
+        cases = {
+            item.case_id: item
+            for item in self.engine._load_cases(
+                self.dataset / "sample_deletion_requests.csv"
+            )
+        }
+        self.assertEqual(
+            self.engine.workflow.account_resource(cases["case_18"]),
+            "account_5521",
+        )
+        self.assertEqual(
+            self.engine.workflow.account_resource(cases["case_20"]),
+            "account_5037",
+        )
+        for ambiguous in ("case_25", "case_26", "case_28", "case_29", "case_31", "case_32"):
+            self.assertEqual(self.engine.workflow.account_resource(cases[ambiguous]), "")
+
+    def test_batch_workflow_solver_never_returns_conflicting_owner(self) -> None:
+        for members in self.engine.workflow.groups.values():
+            for case in members:
+                resource = self.engine.workflow.account_resource(case)
+                if not resource:
+                    continue
+                identity = self.engine.identities.resolve(case)
+                self.assertIsNotNone(identity)
+                aliases = self.engine.identities.aliases_at_time(
+                    identity,
+                    case.audit_at,
+                    case.email,
+                )
+                self.assertNotEqual(
+                    self.engine.evidence.ownership_relation(
+                        resource, aliases, case.audit_at
+                    ),
+                    "CONFLICT",
+                    case.case_id,
+                )
+
+    def test_batch_workflow_solver_matches_independent_subject_evidence(self) -> None:
+        validated = 0
+        for members in self.engine.workflow.groups.values():
+            for case in members:
+                resource = self.engine.workflow.account_resource(case)
+                identity = self.engine.identities.resolve(case)
+                expected_result = RESULT_FOR_STATUS.get(case.reported_status)
+                if not resource or identity is None or expected_result is None:
+                    continue
+                candidates = self.engine.workflow.account_events.get(
+                    (case.reported_at, expected_result), set()
+                )
+                independently_linked = {
+                    candidate
+                    for candidate in candidates
+                    if any(
+                        observation.subjects & identity.aliases
+                        for observation in self.engine.evidence.observations_by_resource.get(
+                            candidate, []
+                        )
+                    )
+                }
+                if len(independently_linked) != 1:
+                    continue
+                validated += 1
+                self.assertEqual(resource, next(iter(independently_linked)), case.case_id)
+        self.assertGreaterEqual(validated, 150)
+
+    def test_structured_log_preserves_source_event_time(self) -> None:
+        matching = [
+            item
+            for item in self.engine.evidence.observations
+            if item.evidence_id == "evidence_94"
+            and item.resource_id == "account_3610"
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(
+            matching[0].observed_at,
+            parse_time("2026-09-26T08:37:56Z"),
+        )
 
     def test_unique_workflow_target_requires_independent_anonymized_readback(self) -> None:
         cases = {

@@ -10,6 +10,7 @@ The submission is a complete local application: a deterministic audit engine, mu
 - **Historical identity graph** across current identity data and audit-log mutations.
 - **Evidence adapters** for JSON, SQLite-compatible SQL, structured logs, text, PDFs, and screenshots.
 - **Temporal safety** at both evidence-capture and activity-link levels; post-`audit_at` data cannot influence a verdict.
+- **Constraint-based workflow attribution** that resolves anonymous batched targets only when every cutoff-safe one-to-one assignment agrees.
 - **Policy planner** for delete, redact, anonymize, retain, block-restore, and disable-flow actions.
 - **Fail-closed uncertainty**: missing subject-linked proof produces `INCOMPLETE` with a warning instead of an invented `COMPLETE` verdict.
 - **Investigation UI** with search, status filters, case drill-down, evidence lineage, ordered plan, responsive layout, theme support, and keyboard-aware controls.
@@ -23,6 +24,8 @@ deletion_requests ── intent gate ── historical identity resolver
 evidence manifest ── format adapters ── temporal evidence index
                                            │
 system activity ── cutoff-safe resource/subject links
+                                           │
+batched workflows ── invariant assignment solver
                                            │
 deletion_rules ─────────────── policy reducer + state planner
                                            │
@@ -80,11 +83,12 @@ Then open [http://127.0.0.1:8787](http://127.0.0.1:8787). The UI and API are ser
 1. **Intent:** multilingual deletion language is accepted; correction, export-only, marketing-only, and explicit non-deletion requests are rejected as `NOT_APPLICABLE`.
 2. **Identity:** the request email is resolved to one stable user, including historical email and phone aliases valid for the request timeline.
 3. **Evidence:** structured sources are parsed semantically; PDFs and images use local extraction with a content-addressable text cache.
-4. **Time:** both evidence captures and resource-to-subject activity links must exist at or before `audit_at`.
-5. **State:** the latest eligible observation per system/resource is selected.
-6. **Policy:** the required terminal state is derived by category.
-7. **Plan:** violations generate canonically ordered findings, remediation, and verification; compliant cases generate evidence-backed verification only.
-8. **Validation:** output is rejected if it violates any part of the challenge contract.
+4. **Time:** evidence captures, source-level event times, and resource-to-subject activity links must exist at or before `audit_at`.
+5. **Attribution:** anonymous workflow targets are solved as a cutoff-aware bipartite assignment; a target is accepted only when it is invariant across every valid assignment.
+6. **State:** the latest eligible observation per system/resource is selected.
+7. **Policy:** the required terminal state is derived by category.
+8. **Plan:** violations generate canonically ordered findings, remediation, and verification; compliant cases generate evidence-backed verification only.
+9. **Validation:** output is rejected if it violates any part of the challenge contract.
 
 ## Output contract
 
@@ -107,13 +111,13 @@ On the 32 participant-visible labeled cases:
 | --- | ---: |
 | Case status accuracy | 100.000% |
 | Exact row / exact sequence accuracy | 50.000% |
-| Step-field accuracy | 78.792% |
-| Step precision | 79.651% |
-| Step recall | 70.984% |
+| Step-field accuracy | 80.118% |
+| Step precision | 81.034% |
+| Step recall | 73.057% |
 
 GhostTrace reaches every participant-visible sample verdict without reading labels at prediction time. Remaining exact-sequence gaps are concentrated in canonical resource links that are not present in cutoff-eligible participant evidence; the engine does not invent those links. Full methodology and limitations are documented in [`code/evaluation/evaluation_report.md`](code/evaluation/evaluation_report.md).
 
-The final full-data run currently produces 143 `COMPLETE`, 365 `INCOMPLETE`, and 10 `NOT_APPLICABLE` decisions. Its `output.csv` passes the strict validator with 518/518 rows. Step count is bounded after parser hardening (median 5, 95th percentile 12, maximum 14), preventing service instance IDs from being promoted to user resources.
+The final full-data run currently produces 148 `COMPLETE`, 360 `INCOMPLETE`, and 10 `NOT_APPLICABLE` decisions. Its `output.csv` passes the strict validator with 518/518 rows. Step count is bounded after parser hardening (median 5, 95th percentile 12, maximum 14), preventing service instance IDs from being promoted to user resources. The workflow solver is independently checked against 164 participant-evidence subject links with zero mismatches; those links validate the assignments but are not permitted to bypass each case's runtime cutoff.
 
 ## Security and privacy posture
 
@@ -135,6 +139,7 @@ code/
 │   ├── identity.py          temporal identity resolution
 │   ├── intent.py            multilingual intent gate
 │   ├── evidence.py          multi-format evidence adapters/index
+│   ├── workflow.py          cutoff-safe batch assignment solver
 │   ├── engine.py            policy reducer and plan generator
 │   ├── validation.py        strict output contract validator
 │   └── server.py            local investigation API/server

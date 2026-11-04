@@ -21,6 +21,7 @@ EMAIL_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
 USER_RE = re.compile(r"\buser[_\s-]?(\d+)\b", re.I)
 HASH_RE = re.compile(r"\b[a-f0-9]{64}\b", re.I)
 KV_RE = re.compile(r"([A-Za-z_][\w.-]*)=(\"[^\"]*\"|'[^']*'|\S+)")
+ISO_PREFIX_RE = re.compile(r"^\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b")
 
 PREFIX_META = {
     "account": ("account_service", "USER_PROFILE"),
@@ -249,9 +250,13 @@ class EvidenceIndex:
         self.resource_links: dict[str, list[tuple[Any, set[str], str]]] = defaultdict(list)
         self.activity_events: list[dict[str, Any]] = []
         self.observations: list[Observation] = []
+        self.observations_by_resource: dict[str, list[Observation]] = defaultdict(list)
         self.extraction_warnings: list[str] = []
+        self._captured_at = {item.file_id: item.captured_at for item in self.files}
         self._load_activity_links()
         self._extract_all()
+        for observation in self.observations:
+            self.observations_by_resource[observation.resource_id].append(observation)
 
     def _load_manifest(self) -> list[EvidenceFile]:
         result: list[EvidenceFile] = []
@@ -430,10 +435,10 @@ class EvidenceIndex:
     ) -> list[Observation]:
         if not text.strip():
             return []
-        groups: dict[str, list[str]] = defaultdict(list)
+        groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
         free_lines: list[str] = []
         result: list[Observation] = []
-        for line in text.splitlines():
+        for line_no, line in enumerate(text.splitlines(), 1):
             parts = [part.strip().lstrip("- ") for part in line.split("|")]
             if len(parts) >= 6 and RESOURCE_RE.search(parts[2]):
                 resource = canonical_resource(parts[2])
@@ -444,6 +449,7 @@ class EvidenceIndex:
                     "record_type": parts[3],
                     "result": parts[4],
                     "lookup_value": parts[5],
+                    "_line_no": line_no,
                 }
                 inferred_system, inferred_category = meta_for_text_resource(
                     resource, evidence, record, line
@@ -463,9 +469,13 @@ class EvidenceIndex:
                 continue
             match = re.search(r"\btrace_id=([^\s]+)", line)
             if match:
-                groups[match.group(1)].append(line)
+                groups[match.group(1)].append((line_no, line))
             elif "resource_id=" in line:
                 record = {key: value.strip("\"'") for key, value in KV_RE.findall(line)}
+                record["_line_no"] = line_no
+                leading_time = ISO_PREFIX_RE.search(line)
+                if leading_time:
+                    record["observed_at"] = leading_time.group(1)
                 resource = canonical_resource(record.get("resource_id", ""))
                 if resource:
                     system_id, category = meta_for_text_resource(
@@ -488,9 +498,14 @@ class EvidenceIndex:
                     )
             else:
                 free_lines.append(line)
-        for lines in groups.values():
+        for entries in groups.values():
+            lines = [line for _line_no, line in entries]
             merged = " ".join(lines)
             record = {key: value.strip("\"'") for key, value in KV_RE.findall(merged)}
+            record["_line_no"] = min(line_no for line_no, _line in entries)
+            leading_time = ISO_PREFIX_RE.search(lines[0])
+            if leading_time:
+                record["observed_at"] = leading_time.group(1)
             explicit_resource = record.get("resource_id", "")
             resources = {canonical_resource(explicit_resource)} if explicit_resource else set()
             if not resources:
@@ -543,29 +558,58 @@ class EvidenceIndex:
         return result
 
     def eligible(self, audit_at) -> list[Observation]:
-        captured = {item.file_id: item.captured_at for item in self.files}
         return [
             observation
             for observation in self.observations
-            if captured.get(observation.evidence_id, observation.observed_at) <= audit_at
+            if self._captured_at.get(
+                observation.evidence_id, observation.observed_at
+            ) <= audit_at
             and observation.observed_at <= audit_at
         ]
 
     def matches(self, observation: Observation, aliases: set[str], audit_at) -> bool:
         """Resolve subject ownership without allowing post-cutoff activity links."""
+        relation = self.ownership_relation(observation.resource_id, aliases, audit_at)
+        if relation != "UNKNOWN":
+            return relation == "MATCH"
+        return observation.matches(aliases)
+
+    def ownership_relation(
+        self,
+        resource_id: str,
+        aliases: set[str],
+        audit_at,
+    ) -> str:
+        """Return MATCH, CONFLICT, or UNKNOWN at a decision cutoff.
+
+        Explicit activity-catalog links have precedence over extracted text.
+        Subject-bearing observations are used only when no authoritative link
+        exists. Anonymous evidence therefore remains UNKNOWN rather than being
+        silently assigned.
+        """
         eligible_links = [
             subjects
             for linked_at, subjects, _activity_id in self.resource_links.get(
-                observation.resource_id, []
+                resource_id, []
             )
             if linked_at <= audit_at
         ]
-        # The data catalog is authoritative when it explicitly links a resource.
-        # This prevents a broad OCR window from assigning a neighboring table
-        # row's identity to a resource owned by somebody else.
         if eligible_links:
-            return any(bool(subjects & aliases) for subjects in eligible_links)
-        return observation.matches(aliases)
+            return "MATCH" if any(subjects & aliases for subjects in eligible_links) else "CONFLICT"
+        subject_observations = [
+            item
+            for item in self.observations_by_resource.get(resource_id, [])
+            if item.subjects
+            and self._captured_at.get(item.evidence_id, item.observed_at) <= audit_at
+            and item.observed_at <= audit_at
+        ]
+        if not subject_observations:
+            return "UNKNOWN"
+        return (
+            "MATCH"
+            if any(item.subjects & aliases for item in subject_observations)
+            else "CONFLICT"
+        )
 
     def unambiguous_account_resource(
         self,
@@ -723,7 +767,9 @@ class EvidenceIndex:
             if normalize(event.get("target_system")) != "analytics_platform":
                 continue
             resource = canonical_resource(event.get("resource_id", ""))
-            if resource.startswith("analytics_"):
+            if resource.startswith("analytics_") and self.ownership_relation(
+                resource, aliases, case.audit_at
+            ) != "CONFLICT":
                 candidates.add(resource)
         if len(candidates) != 1:
             return None

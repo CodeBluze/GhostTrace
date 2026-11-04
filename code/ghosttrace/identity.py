@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 from .domain import Case, Identity, normalize, parse_time
@@ -42,18 +43,41 @@ class IdentityIndex:
         return None
 
     def aliases_at(self, identity: Identity, case: Case) -> set[str]:
-        aliases = {normalize(case.email), normalize(identity.user_id)}
+        return self.aliases_at_time(
+            identity,
+            case.audit_at,
+            case.email,
+            include_all_history=True,
+        )
+
+    def aliases_at_time(
+        self,
+        identity: Identity,
+        audit_at: datetime,
+        request_email: str = "",
+        *,
+        include_all_history: bool = False,
+    ) -> set[str]:
+        """Return only aliases known by a specific decision cutoff.
+
+        Cross-case workflow attribution uses the target decision's cutoff for
+        every cohort member. This prevents a later case's evidence window from
+        leaking future identity changes into an earlier audit.
+        """
+        aliases = {normalize(request_email), normalize(identity.user_id)}
         updated_at = parse_time(identity.current.get("updated_at"))
-        if updated_at <= case.audit_at:
+        if updated_at <= audit_at:
             aliases.update(normalize(identity.current.get(key)) for key in IDENTITY_FIELDS)
         for row in self.audit_rows:
-            if row["user_id"] != identity.user_id or parse_time(row["event_time"]) > case.audit_at:
+            if row["user_id"] != identity.user_id or parse_time(row["event_time"]) > audit_at:
                 continue
             if row["field_name"] in IDENTITY_FIELDS:
                 aliases.add(normalize(row["old_value"]))
                 aliases.add(normalize(row["new_value"]))
-        # Historical deletion requires finding every identifier ever attached to
-        # the stable subject. The cutoff is enforced on evidence, not aliases.
-        aliases.update(identity.aliases)
+        if include_all_history:
+            # The primary audit path deliberately searches every historical
+            # alias ever attached to the stable subject. Evidence eligibility
+            # still enforces the case cutoff.
+            aliases.update(identity.aliases)
         return {alias for alias in aliases if alias}
 
