@@ -153,6 +153,6 @@ See [`problem_statement.md`](problem_statement.md) for the official participant 
 
 ## Submission
 
-Build `code.zip` with `python3 code/package_submission.py`, submit the root `output.csv`, and upload `log.txt` as the chat transcript. The challenge submission page is:
+Build `code.zip` with `python3 code/package_submission.py`, submit the root `output.csv`, and upload `log.txt` as the chat transcript. The archive includes the required reports at the exact paths `evaluation/evaluation_report.md` and `evaluation/usage_report.md`; their source-of-truth copies remain beside the evaluator under `code/evaluation/`. The challenge submission page is:
 
 https://www.hackerrank.com/contests/hackerrank-orchestrate-october26/challenges/ghost-data-still-exists
