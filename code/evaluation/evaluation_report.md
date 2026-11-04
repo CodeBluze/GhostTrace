@@ -97,4 +97,4 @@ python3 code/main.py run
 python3 code/main.py validate
 ```
 
-Final regression result: **28/28 tests pass**. The suite includes manifest-completeness, extraction-health, temporal-safety, trace-dialect, dynamic-policy, full-plan, alias-validity, invariant-assignment, and independent-attribution gates so a checkout cannot silently omit evidence or accept an unsupported mapping.
+Final regression result: **29/29 tests pass**. The suite includes manifest-completeness, extraction-health, temporal-safety, trace-dialect, dynamic-policy, full-plan, alias-validity, invariant-assignment, independent-attribution, and byte-reproducible packaging gates so a checkout cannot silently omit evidence, accept an unsupported mapping, or emit a timestamp-dependent submission archive.

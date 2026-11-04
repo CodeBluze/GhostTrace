@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "code.zip"
 EXCLUDED_PARTS = {"__pycache__", ".venv", "venv", "node_modules", ".git"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip", ".tar", ".gz", ".tgz", ".7z", ".rar"}
+FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
 def included_files() -> list[Path]:
@@ -24,11 +25,30 @@ def included_files() -> list[Path]:
     )
 
 
+def build_archive(output: Path = OUTPUT) -> list[Path]:
+    """Write a byte-reproducible archive independent of checkout timestamps."""
+    files = included_files()
+    with zipfile.ZipFile(output, "w") as archive:
+        for path in files:
+            info = zipfile.ZipInfo(
+                path.relative_to(ROOT).as_posix(),
+                date_time=FIXED_ZIP_TIMESTAMP,
+            )
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(
+                info,
+                path.read_bytes(),
+                compress_type=zipfile.ZIP_DEFLATED,
+                compresslevel=9,
+            )
+    return files
+
+
 def main() -> int:
-    with zipfile.ZipFile(OUTPUT, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for path in included_files():
-            archive.write(path, path.relative_to(ROOT))
-    print(f"Created {OUTPUT} with {len(included_files())} files")
+    files = build_archive()
+    print(f"Created {OUTPUT} with {len(files)} files")
     return 0
 
 

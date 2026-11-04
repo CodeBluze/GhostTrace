@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -21,6 +23,7 @@ from ghosttrace.policy import PolicyIndex  # noqa: E402
 from ghosttrace.validation import validate_output  # noqa: E402
 from ghosttrace.workflow import RESULT_FOR_STATUS  # noqa: E402
 from main import write_output  # noqa: E402
+from package_submission import build_archive  # noqa: E402
 
 
 class GhostTraceEngineTests(unittest.TestCase):
@@ -281,6 +284,29 @@ class GhostTraceEngineTests(unittest.TestCase):
             self.assertEqual(report["rows"], 518)
             validation = validate_output(output, self.dataset / "deletion_requests.csv")
             self.assertTrue(validation["valid"], validation["errors"][:5])
+
+    def test_submission_archive_is_reproducible_and_dataset_free(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = Path(temp_dir) / "first.zip"
+            second = Path(temp_dir) / "second.zip"
+            build_archive(first)
+            build_archive(second)
+            self.assertEqual(
+                hashlib.sha256(first.read_bytes()).digest(),
+                hashlib.sha256(second.read_bytes()).digest(),
+            )
+            with zipfile.ZipFile(first) as archive:
+                names = archive.namelist()
+                self.assertEqual(archive.testzip(), None)
+                self.assertFalse(
+                    any(
+                        name == "log.txt"
+                        or name.startswith("dataset/")
+                        or "__pycache__" in name
+                        or name.endswith(".zip")
+                        for name in names
+                    )
+                )
 
     def test_validator_rejects_unknown_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
