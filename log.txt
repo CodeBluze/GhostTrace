@@ -260,3 +260,27 @@ branch=codex/ghosttrace-accuracy-hardening
 repo_root=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
 worktree=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
 parent_agent=none
+
+## [2026-11-04T21:31:40+05:30] Cross-platform evidence completeness hardened
+
+User Prompt (verbatim, secrets redacted):
+ok proceed with highest engineering standards
+we must win this hackathon by the largest margin 
+u know how it going to be judged right on basis of that make the most powerfull system possible do it completely perfectly accurately and precisely with the highest engineering standards in one go
+
+Agent Response Summary:
+Continued the release against the actual judging contract rather than claiming completion prematurely. GitHub's independent Ubuntu run revealed that a broad `.gitignore` rule excluded 26 participant evidence logs from fresh checkouts; the repository boundary was corrected and a manifest-completeness/extraction-health regression test was added. The exact pushed branch subsequently passed all 17 tests from a brand-new zero-cache clone containing all 94 manifest artifacts.
+
+Actions:
+* Diagnosed GitHub Actions run 41826976588 and traced three failures to missing manifest artifacts.
+* Unignored and committed all 26 `dataset/evidence/logs/*.log` files referenced by the participant manifest.
+* Added a regression test requiring every manifest path to exist and all evidence extraction to complete without warnings.
+* Verified 94/94 manifest paths are Git-tracked and 17/17 tests pass locally and in an isolated remote clone.
+
+Context:
+tool=Codex desktop
+model=GPT-5
+branch=codex/ghosttrace-accuracy-hardening
+repo_root=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
+worktree=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
+parent_agent=none
