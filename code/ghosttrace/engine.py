@@ -104,6 +104,20 @@ class GhostTraceEngine:
             for observation in self.evidence.eligible(case.audit_at)
             if self.evidence.matches(observation, aliases, case.audit_at)
         ]
+        workflow_account = self.evidence.unambiguous_account_resource(case, aliases)
+        if workflow_account and not any(
+            item.resource_id == workflow_account for item in observations
+        ):
+            absence_proof = self.evidence.verified_account_readback(
+                workflow_account, case, aliases
+            ) or self.evidence.prove_account_absence(workflow_account, case)
+            if absence_proof is not None:
+                observations.append(absence_proof)
+        anonymization_proof = self.evidence.verified_unique_anonymization(case, aliases)
+        if anonymization_proof is not None and not any(
+            item.resource_id == anonymization_proof.resource_id for item in observations
+        ):
+            observations.append(anonymization_proof)
         observations = latest_by_resource(observations)
         observations = [item for item in observations if item.category in ACTION_BY_CATEGORY]
 
@@ -112,7 +126,24 @@ class GhostTraceEngine:
         # to the investigator UI through the EvidenceIndex.
         violations = [item for item in observations if not self._compliant(item)]
         status = "INCOMPLETE" if violations else "COMPLETE"
-        steps = self._steps(observations, status)
+        planned_verifications: list[Observation] = []
+        if (
+            status == "INCOMPLETE"
+            and workflow_account
+            and not any(item.resource_id == workflow_account for item in observations)
+        ):
+            planned_verifications.append(
+                Observation(
+                    system_id="account_service",
+                    resource_id=workflow_account,
+                    category="USER_PROFILE",
+                    state="ABSENT",
+                    observed_at=case.audit_at,
+                    evidence_id="",
+                    confidence=0.75,
+                )
+            )
+        steps = self._steps(observations, status, planned_verifications)
         warnings: list[str] = []
         if not observations:
             status = "INCOMPLETE"
@@ -133,7 +164,12 @@ class GhostTraceEngine:
         action = ACTION_BY_CATEGORY[observation.category]
         return observation.state == TARGET_STATE[action]
 
-    def _steps(self, observations: list[Observation], status: str) -> list[Step]:
+    def _steps(
+        self,
+        observations: list[Observation],
+        status: str,
+        planned_verifications: list[Observation] | None = None,
+    ) -> list[Step]:
         raw: list[tuple[str, str, str, str, str, str]] = []
         if status == "INCOMPLETE":
             for observation in observations:
@@ -157,7 +193,11 @@ class GhostTraceEngine:
                 raw.append(("FINDING", observation.system_id, observation.resource_id, finding[0], finding[1], observation.evidence_id))
                 raw.append(("REMEDIATION", observation.system_id, observation.resource_id, remediation[0], remediation[1], ""))
 
-        for observation in observations:
+        verification_observations = [
+            *observations,
+            *(planned_verifications or []),
+        ]
+        for observation in verification_observations:
             action = ACTION_BY_CATEGORY[observation.category]
             operation = {
                 "DELETE": "VERIFY_RECORD_ABSENT",

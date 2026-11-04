@@ -105,15 +105,15 @@ On the 32 participant-visible labeled cases:
 
 | Metric | Result |
 | --- | ---: |
-| Case status accuracy | 90.625% |
-| Exact row / exact sequence accuracy | 18.750% |
-| Step-field accuracy | 66.062% |
-| Step precision | 62.346% |
-| Step recall | 52.332% |
+| Case status accuracy | 100.000% |
+| Exact row / exact sequence accuracy | 50.000% |
+| Step-field accuracy | 78.792% |
+| Step precision | 79.651% |
+| Step recall | 70.984% |
 
-The three status misses are deliberately fail-closed cases where the visible evidence does not provide a subject-to-resource link. GhostTrace does not use the public labels as prediction shortcuts. Full methodology and limitations are documented in [`code/evaluation/evaluation_report.md`](code/evaluation/evaluation_report.md).
+GhostTrace reaches every participant-visible sample verdict without reading labels at prediction time. Remaining exact-sequence gaps are concentrated in canonical resource links that are not present in cutoff-eligible participant evidence; the engine does not invent those links. Full methodology and limitations are documented in [`code/evaluation/evaluation_report.md`](code/evaluation/evaluation_report.md).
 
-The final full-data run currently produces 142 `COMPLETE`, 366 `INCOMPLETE`, and 10 `NOT_APPLICABLE` decisions. Its `output.csv` passes the strict validator with 518/518 rows. Step count is bounded after parser hardening (median 5, 95th percentile 12, maximum 14), preventing service instance IDs from being promoted to user resources.
+The final full-data run currently produces 143 `COMPLETE`, 365 `INCOMPLETE`, and 10 `NOT_APPLICABLE` decisions. Its `output.csv` passes the strict validator with 518/518 rows. Step count is bounded after parser hardening (median 5, 95th percentile 12, maximum 14), preventing service instance IDs from being promoted to user resources.
 
 ## Security and privacy posture
 

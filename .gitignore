@@ -21,4 +21,6 @@ code.zip
 output.csv
 *.log
 !log.txt
+!dataset/evidence/logs/
+!dataset/evidence/logs/*.log
 

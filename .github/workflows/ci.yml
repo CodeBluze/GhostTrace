@@ -1,0 +1,37 @@
+name: GhostTrace quality gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install local evidence extractors
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes poppler-utils tesseract-ocr
+      - name: Compile
+        run: python -m compileall -q code
+      - name: Test
+        run: python -m unittest discover -s code/tests -v
+      - name: Generate and validate all decisions
+        run: |
+          python code/main.py run
+          python code/main.py validate
+      - name: Evaluate public sample
+        run: python code/evaluation/main.py
+      - name: Verify submission package
+        run: |
+          python code/package_submission.py
+          unzip -t code.zip

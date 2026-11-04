@@ -1,4 +1,4 @@
-const state = { cases: [], selected: null, status: "", query: "", index: -1 };
+const state = { cases: [], selected: null, status: "", query: "", index: -1, requestVersion: 0 };
 const $ = (selector) => document.querySelector(selector);
 const esc = (value = "") => String(value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 const date = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
@@ -23,12 +23,21 @@ async function init() {
 }
 
 function bind() {
-  $("#caseSearch").addEventListener("input", event => { state.query = event.target.value; renderCases(); });
+  $("#caseSearch").addEventListener("input", event => {
+    state.query = event.target.value;
+    renderCases();
+    reconcileSelection();
+  });
   $("#statusFilters").addEventListener("click", event => {
     const button = event.target.closest("button"); if (!button) return;
     state.status = button.dataset.status;
-    document.querySelectorAll("#statusFilters button").forEach(item => item.classList.toggle("active", item === button));
+    document.querySelectorAll("#statusFilters button").forEach(item => {
+      const active = item === button;
+      item.classList.toggle("active", active);
+      item.setAttribute("aria-pressed", String(active));
+    });
     renderCases();
+    reconcileSelection();
   });
   $("#themeButton").addEventListener("click", () => {
     const dark = document.documentElement.dataset.theme === "dark";
@@ -48,7 +57,7 @@ function bind() {
 
 function filteredCases() {
   const needle = state.query.toLowerCase().trim();
-  return state.cases.filter(item => (!state.status || item.status === state.status) && (!needle || `${item.caseId} ${item.email}`.toLowerCase().includes(needle)));
+  return state.cases.filter(item => (!state.status || item.status === state.status) && (!needle || `${item.caseId} ${item.email} ${item.userId}`.toLowerCase().includes(needle)));
 }
 
 function renderCases() {
@@ -62,9 +71,19 @@ function renderCases() {
   document.querySelectorAll(".case-card").forEach((button, index) => button.addEventListener("click", () => { state.index = index; selectCase(button.dataset.id); }));
 }
 
+function reconcileSelection() {
+  const visible = filteredCases();
+  if (visible.length && !visible.some(item => item.caseId === state.selected)) {
+    state.index = 0;
+    selectCase(visible[0].caseId);
+  }
+}
+
 async function selectCase(caseId) {
+  const version = ++state.requestVersion;
   state.selected = caseId; renderCases();
   const data = await api(`/api/cases/${caseId}`);
+  if (version !== state.requestVersion) return;
   renderCase(data);
   document.querySelector(`.case-card[data-id="${caseId}"]`)?.scrollIntoView({ block: "nearest" });
 }
@@ -98,7 +117,10 @@ function renderSteps(steps) {
 }
 
 function renderEvidence(observations) {
-  $("#observationCount").textContent = observations.length; $("#evidenceList").innerHTML = observations.length ? observations.slice(-24).reverse().map(item => `
+  const unique = [...new Map(observations.map(item => [
+    `${item.systemId}/${item.resourceId}/${item.state}/${item.observedAt}/${item.evidenceId}`, item,
+  ])).values()];
+  $("#observationCount").textContent = unique.length; $("#evidenceList").innerHTML = unique.length ? unique.slice(-24).reverse().map(item => `
     <article class="evidence-row"><header><strong>${esc(item.resourceId)}</strong><span class="state ${statusClass(item.state)}">${esc(item.state)}</span></header>
       <p>${esc(item.systemId)} · ${esc(item.category)}</p><small>${esc(item.evidenceId)} · ${date(item.observedAt)}</small></article>`).join("") : `<p class="muted-placeholder">No cutoff-eligible observations.</p>`;
 }
