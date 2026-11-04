@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="GhostTrace evidence-grounded deletion audit workstation" />
+    <title>GhostTrace — Deletion Assurance</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="GhostTrace home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span><strong>GhostTrace</strong><small>Deletion assurance</small></span>
+      </a>
+      <div class="topbar-center" aria-label="Environment">
+        <span class="environment-dot"></span>
+        Participant evidence · point-in-time mode
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-button" id="themeButton" aria-label="Toggle theme" title="Toggle theme">◐</button>
+        <span class="engine-badge"><span></span> Engine ready</span>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="case-rail" aria-label="Audit cases">
+        <div class="rail-heading">
+          <div><span class="eyebrow">Investigation queue</span><h1>Deletion audits</h1></div>
+          <span class="count" id="caseCount">—</span>
+        </div>
+        <label class="search-box">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"></circle><path d="m13 13 4 4"></path></svg>
+          <input id="caseSearch" type="search" placeholder="Case, email, or user" autocomplete="off" />
+          <kbd>/</kbd>
+        </label>
+        <div class="segments" id="statusFilters" role="group" aria-label="Filter by status">
+          <button class="active" data-status="">All</button>
+          <button data-status="INCOMPLETE">Open</button>
+          <button data-status="COMPLETE">Clear</button>
+          <button data-status="NOT_APPLICABLE">N/A</button>
+        </div>
+        <div class="case-list" id="caseList" aria-live="polite"></div>
+      </aside>
+
+      <section class="workspace">
+        <div class="workspace-scroll">
+          <section class="hero-panel">
+            <div>
+              <span class="eyebrow" id="caseEyebrow">Select an audit</span>
+              <h2 id="caseTitle">Evidence, not workflow claims.</h2>
+              <p id="caseSubtitle">Choose a case to reconstruct identity lineage and the true state at its audit cutoff.</p>
+            </div>
+            <div class="verdict-wrap" id="verdictWrap" hidden>
+              <span class="verdict-label">Grounded verdict</span>
+              <span class="verdict" id="verdict">—</span>
+            </div>
+          </section>
+
+          <section class="metrics-band" id="metricsBand">
+            <article><span>Total cases</span><strong id="metricTotal">—</strong><small>evaluation requests</small></article>
+            <article><span>Incomplete</span><strong id="metricIncomplete">—</strong><small>requires action</small></article>
+            <article><span>Evidence</span><strong id="metricEvidence">—</strong><small>source artifacts</small></article>
+            <article><span>Observations</span><strong id="metricObservations">—</strong><small>normalized states</small></article>
+          </section>
+
+          <section class="panel graph-panel">
+            <div class="panel-heading">
+              <div><span class="eyebrow">Identity-to-resource graph</span><h3>Evidence topology</h3></div>
+              <div class="legend"><span><i class="subject"></i>Subject</span><span><i class="compliant"></i>Compliant</span><span><i class="risk"></i>Risk</span></div>
+            </div>
+            <div class="graph-stage" id="graphStage">
+              <div class="empty-state"><span class="empty-orbit"></span><strong>No case selected</strong><p>Resource relationships will appear here.</p></div>
+            </div>
+          </section>
+
+          <section class="panel sequence-panel">
+            <div class="panel-heading">
+              <div><span class="eyebrow">Canonical execution order</span><h3>Audit sequence</h3></div>
+              <span class="mono-meta" id="stepCount">0 steps</span>
+            </div>
+            <div class="steps" id="steps"><p class="muted-placeholder">Select a case to inspect findings, remediation, and verification.</p></div>
+          </section>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Case inspector">
+        <div class="inspector-section">
+          <span class="eyebrow">Case context</span>
+          <dl class="detail-list" id="caseDetails">
+            <div><dt>Audit cutoff</dt><dd>—</dd></div>
+            <div><dt>Reported state</dt><dd>—</dd></div>
+            <div><dt>Resolved subject</dt><dd>—</dd></div>
+            <div><dt>Confidence</dt><dd>—</dd></div>
+          </dl>
+        </div>
+        <div class="inspector-section">
+          <span class="eyebrow">Request language</span>
+          <blockquote id="requestText">Select a case to view the original request.</blockquote>
+        </div>
+        <div class="inspector-section">
+          <div class="section-row"><span class="eyebrow">Evidence ledger</span><span id="observationCount">0</span></div>
+          <div class="evidence-list" id="evidenceList"><p class="muted-placeholder">No observations loaded.</p></div>
+        </div>
+        <div class="inspector-section warnings-section" id="warningsSection" hidden>
+          <span class="eyebrow">Uncertainty ledger</span>
+          <div id="warningList"></div>
+        </div>
+      </aside>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
+

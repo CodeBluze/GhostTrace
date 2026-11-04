@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+import csv
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+
+CODE_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = CODE_DIR.parent
+
+import sys
+
+sys.path.insert(0, str(CODE_DIR))
+
+from ghosttrace.engine import GhostTraceEngine, OPERATION_ORDER, PHASE_ORDER  # noqa: E402
+from ghosttrace.intent import authorizes_deletion  # noqa: E402
+from ghosttrace.validation import validate_output  # noqa: E402
+from main import write_output  # noqa: E402
+
+
+class GhostTraceEngineTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.dataset = REPO_ROOT / "dataset"
+        cls.engine = GhostTraceEngine(cls.dataset, cache_dir=REPO_ROOT / ".ghosttrace-cache")
+
+    def test_every_request_resolves_to_one_identity(self) -> None:
+        unresolved = [case.case_id for case in self.engine.cases if self.engine.identities.resolve(case) is None]
+        self.assertEqual(unresolved, [])
+
+    def test_intent_gate_matches_known_non_deletion_requests(self) -> None:
+        not_applicable = {f"case_{number}" for number in range(533, 543)}
+        classified = {case.case_id for case in self.engine.cases if not authorizes_deletion(case.request_text)}
+        self.assertEqual(classified, not_applicable)
+
+    def test_no_observation_crosses_case_cutoff(self) -> None:
+        for case in self.engine.cases:
+            for observation in self.engine.evidence.eligible(case.audit_at):
+                self.assertLessEqual(observation.observed_at, case.audit_at)
+
+    def test_structured_logs_do_not_promote_instance_names_to_resources(self) -> None:
+        known_instance_ids = {
+            "account_5",
+            "analytics_4",
+            "search_2",
+            "support_5",
+        }
+        parsed_resources = {item.resource_id for item in self.engine.evidence.observations}
+        self.assertTrue(known_instance_ids.isdisjoint(parsed_resources))
+
+    def test_output_is_complete_and_contract_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "output.csv"
+            report = write_output(self.engine, output)
+            self.assertEqual(report["rows"], 518)
+            validation = validate_output(output, self.dataset / "deletion_requests.csv")
+            self.assertTrue(validation["valid"], validation["errors"][:5])
+
+    def test_steps_are_canonically_sorted(self) -> None:
+        for decision in self.engine.audit_all():
+            keys = [
+                (PHASE_ORDER[step.phase], OPERATION_ORDER[step.operation], step.system_id, step.resource_id)
+                for step in decision.steps
+            ]
+            self.assertEqual(keys, sorted(keys), decision.case_id)
+            self.assertEqual([step.step_no for step in decision.steps], list(range(1, len(decision.steps) + 1)))
+
+    def test_public_sample_status_accuracy_gate(self) -> None:
+        sample_cases = self.engine._load_cases(self.dataset / "sample_deletion_requests.csv")
+        predictions = {item.case_id: item for item in self.engine.audit_all(sample_cases)}
+        with (self.dataset / "sample_output.csv").open(encoding="utf-8", newline="") as handle:
+            expected = list(csv.DictReader(handle))
+        hits = sum(predictions[row["case_id"]].deletion_status == row["deletion_status"] for row in expected)
+        self.assertGreaterEqual(hits / len(expected), 0.90)
+
+
+class IntentTests(unittest.TestCase):
+    def test_multilingual_deletion(self) -> None:
+        examples = [
+            "Please permanently delete my account and personal data.",
+            "Je demande la suppression définitive de mon compte.",
+            "Solicito a exclusão permanente da conta.",
+            "このアカウントの完全な削除を依頼します。",
+        ]
+        self.assertTrue(all(authorizes_deletion(text) for text in examples))
+
+    def test_non_deletion(self) -> None:
+        examples = [
+            "Please correct my phone number and leave the account active.",
+            "I need a data export, not deletion.",
+            "Remove me from marketing lists only.",
+        ]
+        self.assertTrue(all(not authorizes_deletion(text) for text in examples))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
