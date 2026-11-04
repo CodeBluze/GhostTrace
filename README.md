@@ -1,6 +1,8 @@
-# HackerRank Orchestrate - October 2026
+# GhostTrace
 
-## Ghost Data Still Exists
+## HackerRank Orchestrate — Ghost Data Still Exists
+
+GhostTrace is an AI deletion auditor that resolves historical identities, traces personal data across systems, detects surviving copies and restore risks, and returns evidence-backed verdicts with ordered remediation and verification steps.
 
 Build an AI agent that audits whether a user's personal data was actually deleted.
 
