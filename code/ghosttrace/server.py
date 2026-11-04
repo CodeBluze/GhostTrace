@@ -60,6 +60,7 @@ def serve(engine: GhostTraceEngine, host: str = "127.0.0.1", port: int = 8787) -
                         {
                             "caseId": case.case_id,
                             "email": case.email,
+                            "userId": decision.user_id,
                             "auditAt": case.audit_at.isoformat(),
                             "status": decision.deletion_status,
                             "confidence": decision.confidence,
@@ -132,8 +133,7 @@ def serve(engine: GhostTraceEngine, host: str = "127.0.0.1", port: int = 8787) -
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
+            self._security_headers()
             self.end_headers()
             self.wfile.write(data)
 
@@ -151,9 +151,22 @@ def serve(engine: GhostTraceEngine, host: str = "127.0.0.1", port: int = 8787) -
             self.send_header("Content-Type", f"{mime}; charset=utf-8" if mime.startswith("text/") else mime)
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("X-Content-Type-Options", "nosniff")
+            self._security_headers()
             self.end_headers()
             self.wfile.write(data)
+
+        def _security_headers(self) -> None:
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+                "form-action 'none'; img-src 'self' data:; connect-src 'self'; "
+                "script-src 'self'; style-src 'self'",
+            )
 
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"GhostTrace workstation: http://{host}:{port}")

@@ -10,7 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterator
 
-from .domain import EvidenceFile, Observation, normalize, parse_time
+from .domain import Case, EvidenceFile, Observation, normalize, parse_time
 
 
 RESOURCE_RE = re.compile(
@@ -100,6 +100,46 @@ def meta_for_resource(resource_id: str) -> tuple[str, str]:
         if resource_id.startswith(prefix + "_"):
             return PREFIX_META[prefix]
     return "unknown_system", "UNKNOWN"
+
+
+def meta_for_text_resource(
+    resource_id: str,
+    evidence: EvidenceFile,
+    record: dict[str, Any],
+    context: str,
+) -> tuple[str, str]:
+    """Refine prefix metadata using source semantics, never case labels.
+
+    A shared resource prefix is not always a policy category. Support exports
+    can describe an exclusive attachment or a legacy contact index rather than
+    a retained conversation, and analytics infrastructure can host a marketing
+    contact record. The evidence source and operation make that distinction.
+    """
+    system_id, category = meta_for_resource(resource_id)
+    hint = normalize(
+        " ".join(
+            (
+                evidence.path,
+                evidence.origin,
+                str(record.get("event", "")),
+                str(record.get("record_type", "")),
+                context,
+            )
+        )
+    )
+    if resource_id.startswith("support_"):
+        if any(token in hint for token in ("attachment", "uploaded file", "checksum prefix")):
+            category = "SUPPORT_ATTACHMENT"
+        elif any(
+            token in hint
+            for token in ("contact_query", "legacy_contact_index", "deletion_marker_check")
+        ):
+            category = "SECONDARY_IDENTIFIER"
+    elif resource_id.startswith("analytics_") and any(
+        token in hint for token in ("contact_lookup", "email_opt_in")
+    ):
+        category = "MARKETING_PROFILE"
+    return system_id, category
 
 
 def _flatten(node: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
@@ -207,6 +247,7 @@ class EvidenceIndex:
         self.cache_dir = cache_dir
         self.files = self._load_manifest()
         self.resource_links: dict[str, list[tuple[Any, set[str], str]]] = defaultdict(list)
+        self.activity_events: list[dict[str, Any]] = []
         self.observations: list[Observation] = []
         self.extraction_warnings: list[str] = []
         self._load_activity_links()
@@ -230,6 +271,9 @@ class EvidenceIndex:
         path = self.dataset_dir / "system_activity.csv"
         with path.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle):
+                event = dict(row)
+                event["parsed_time"] = parse_time(row.get("event_time"))
+                self.activity_events.append(event)
                 resource = canonical_resource(row.get("resource_id", ""))
                 if not resource:
                     continue
@@ -393,7 +437,6 @@ class EvidenceIndex:
             parts = [part.strip().lstrip("- ") for part in line.split("|")]
             if len(parts) >= 6 and RESOURCE_RE.search(parts[2]):
                 resource = canonical_resource(parts[2])
-                inferred_system, inferred_category = meta_for_resource(resource)
                 record = {
                     "recorded_at": parts[0],
                     "system": parts[1],
@@ -402,6 +445,9 @@ class EvidenceIndex:
                     "result": parts[4],
                     "lookup_value": parts[5],
                 }
+                inferred_system, inferred_category = meta_for_text_resource(
+                    resource, evidence, record, line
+                )
                 result.append(
                     Observation(
                         system_id=normalize(parts[1]).replace(" ", "_") or inferred_system,
@@ -422,7 +468,9 @@ class EvidenceIndex:
                 record = {key: value.strip("\"'") for key, value in KV_RE.findall(line)}
                 resource = canonical_resource(record.get("resource_id", ""))
                 if resource:
-                    system_id, category = meta_for_resource(resource)
+                    system_id, category = meta_for_text_resource(
+                        resource, evidence, record, line
+                    )
                     subjects = _subjects(record)
                     subjects.update(normalize(v) for v in EMAIL_RE.findall(line))
                     subjects.update(f"user_{v}" for v in USER_RE.findall(line))
@@ -451,7 +499,9 @@ class EvidenceIndex:
             subjects.update(normalize(v) for v in EMAIL_RE.findall(merged))
             subjects.update(f"user_{v}" for v in USER_RE.findall(merged))
             for resource in resources:
-                system_id, category = meta_for_resource(resource)
+                system_id, category = meta_for_text_resource(
+                    resource, evidence, record, merged
+                )
                 result.append(
                     Observation(
                         system_id=system_id,
@@ -470,8 +520,10 @@ class EvidenceIndex:
         free_text = "\n".join(free_lines)
         for match in RESOURCE_RE.finditer(free_text):
             resource = canonical_resource(match.group(0))
-            system_id, category = meta_for_resource(resource)
             window = free_text[max(0, match.start() - 800): match.end() + 1200]
+            system_id, category = meta_for_text_resource(
+                resource, evidence, {}, window
+            )
             subjects = {normalize(v) for v in EMAIL_RE.findall(window)}
             subjects.update(f"user_{v}" for v in USER_RE.findall(window))
             subjects.update(v.casefold() for v in HASH_RE.findall(window))
@@ -501,12 +553,202 @@ class EvidenceIndex:
 
     def matches(self, observation: Observation, aliases: set[str], audit_at) -> bool:
         """Resolve subject ownership without allowing post-cutoff activity links."""
-        if observation.matches(aliases):
-            return True
-        return any(
-            linked_at <= audit_at and bool(subjects & aliases)
+        eligible_links = [
+            subjects
             for linked_at, subjects, _activity_id in self.resource_links.get(
                 observation.resource_id, []
             )
+            if linked_at <= audit_at
+        ]
+        # The data catalog is authoritative when it explicitly links a resource.
+        # This prevents a broad OCR window from assigning a neighboring table
+        # row's identity to a resource owned by somebody else.
+        if eligible_links:
+            return any(bool(subjects & aliases) for subjects in eligible_links)
+        return observation.matches(aliases)
+
+    def unambiguous_account_resource(
+        self,
+        case: Case,
+        aliases: set[str],
+    ) -> str:
+        """Return a uniquely attributable workflow account near its report.
+
+        Activity results remain claims; this method only discovers the target
+        that a future verification must cover. A narrow window and uniqueness
+        requirement prevent nearby concurrent workflows from being conflated.
+        """
+        before_seconds = 75 * 60
+        after_seconds = 30 * 60
+        candidates: dict[str, str] = {}
+        eligible_observations = self.eligible(case.audit_at)
+        for event in self.activity_events:
+            event_at = event["parsed_time"]
+            offset = (event_at - case.reported_at).total_seconds()
+            if not (-before_seconds <= offset <= after_seconds):
+                continue
+            if event_at > case.audit_at:
+                continue
+            if event.get("event_type") != "DELETE_RECORD":
+                continue
+            if normalize(event.get("target_system")) != "account_service":
+                continue
+            resource = canonical_resource(event.get("resource_id", ""))
+            if not resource.startswith("account_"):
+                continue
+            links = [
+                subjects
+                for linked_at, subjects, _activity_id in self.resource_links.get(resource, [])
+                if linked_at <= case.audit_at
+            ]
+            if links and not any(subjects & aliases for subjects in links):
+                continue
+            subject_bearing_observations = [
+                item
+                for item in eligible_observations
+                if item.resource_id == resource and item.subjects
+            ]
+            if subject_bearing_observations and not any(
+                item.subjects & aliases for item in subject_bearing_observations
+            ):
+                continue
+            candidates[resource] = normalize(event.get("reported_result")).upper()
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        preferred_result = {
+            "COMPLETE": "SUCCESS",
+            "PARTIALLY_COMPLETE": "PARTIAL",
+            "NOT_STARTED": "FAILED",
+        }.get(case.reported_status)
+        preferred = [
+            resource
+            for resource, result in candidates.items()
+            if result == preferred_result
+        ]
+        return preferred[0] if len(preferred) == 1 else ""
+
+    def prove_account_absence(self, resource_id: str, case: Case) -> Observation | None:
+        """Use the latest eligible post-workflow account snapshot as negative proof."""
+        snapshots: list[EvidenceFile] = []
+        for evidence in self.files:
+            path = self.dataset_dir / evidence.path
+            if path.suffix.casefold() != ".sql":
+                continue
+            if not (case.reported_at <= evidence.captured_at <= case.audit_at):
+                continue
+            try:
+                header = path.read_text(encoding="utf-8", errors="replace")[:6000]
+            except OSError:
+                continue
+            if re.search(r"CREATE TABLE\s+customer_profiles", header, re.I):
+                snapshots.append(evidence)
+        if not snapshots:
+            return None
+        snapshot = max(snapshots, key=lambda item: item.captured_at)
+        if any(
+            item.evidence_id == snapshot.file_id and item.resource_id == resource_id
+            for item in self.observations
+        ):
+            return None
+        return Observation(
+            system_id="account_service",
+            resource_id=resource_id,
+            category="USER_PROFILE",
+            state="ABSENT",
+            observed_at=snapshot.captured_at,
+            evidence_id=snapshot.file_id,
+            subjects=set(),
+            attributes={"inference": "absent_from_complete_account_snapshot"},
+            confidence=0.95,
+        )
+
+    def verified_account_readback(
+        self,
+        resource_id: str,
+        case: Case,
+        aliases: set[str],
+    ) -> Observation | None:
+        """Return independent absence proof for an attributed workflow target."""
+        readbacks = [
+            item
+            for item in self.eligible(case.audit_at)
+            if item.resource_id == resource_id
+            and item.category == "USER_PROFILE"
+            and item.state == "ABSENT"
+        ]
+        if not readbacks:
+            return None
+        linked_subjects = [
+            subjects
+            for linked_at, subjects, _activity_id in self.resource_links.get(resource_id, [])
+            if linked_at <= case.audit_at
+        ]
+        if linked_subjects and not any(subjects & aliases for subjects in linked_subjects):
+            return None
+        subject_bearing = [item for item in readbacks if item.subjects]
+        if subject_bearing and not any(item.subjects & aliases for item in subject_bearing):
+            return None
+        return max(
+            readbacks,
+            key=lambda item: (item.observed_at, item.confidence, item.evidence_id),
+        )
+
+    def verified_unique_anonymization(
+        self,
+        case: Case,
+        aliases: set[str],
+    ) -> Observation | None:
+        """Join one unambiguous workflow target to independent readback proof.
+
+        The activity identifies which resource the workflow targeted; it does
+        not establish success. Success is accepted only when a separate,
+        cutoff-eligible evidence observation proves that exact resource is no
+        longer attributable. Concurrent targets make the join ambiguous and
+        are therefore rejected.
+        """
+        if case.reported_status != "COMPLETE":
+            return None
+        before_seconds = 75 * 60
+        after_seconds = 30 * 60
+        candidates: set[str] = set()
+        for event in self.activity_events:
+            event_at = event["parsed_time"]
+            offset = (event_at - case.reported_at).total_seconds()
+            if not (-before_seconds <= offset <= after_seconds):
+                continue
+            if event_at > case.audit_at:
+                continue
+            if event.get("event_type") != "ANONYMIZE_RECORD":
+                continue
+            if normalize(event.get("target_system")) != "analytics_platform":
+                continue
+            resource = canonical_resource(event.get("resource_id", ""))
+            if resource.startswith("analytics_"):
+                candidates.add(resource)
+        if len(candidates) != 1:
+            return None
+        resource = next(iter(candidates))
+        readbacks = [
+            item
+            for item in self.eligible(case.audit_at)
+            if item.resource_id == resource
+            and item.category == "ANALYTICS_PROFILE"
+            and item.state == "ANONYMIZED"
+        ]
+        if not readbacks:
+            return None
+        linked_subjects = [
+            subjects
+            for linked_at, subjects, _activity_id in self.resource_links.get(resource, [])
+            if linked_at <= case.audit_at
+        ]
+        if linked_subjects and not any(subjects & aliases for subjects in linked_subjects):
+            return None
+        subject_bearing = [item for item in readbacks if item.subjects]
+        if subject_bearing and not any(item.subjects & aliases for item in subject_bearing):
+            return None
+        return max(
+            readbacks,
+            key=lambda item: (item.observed_at, item.confidence, item.evidence_id),
         )
 

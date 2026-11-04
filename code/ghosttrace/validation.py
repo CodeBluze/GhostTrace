@@ -31,6 +31,20 @@ FIELDS = {"step_no", "phase", "system_id", "resource_id", "operation", "state", 
 
 def validate_output(output_path: Path, request_path: Path) -> dict[str, Any]:
     errors: list[str] = []
+    dataset_dir = request_path.parent
+    valid_evidence_ids: set[str] = set()
+    for filename, field in (
+        ("evidence_files.csv", "file_id"),
+        ("system_activity.csv", "activity_id"),
+        ("user_audit_log.csv", "audit_id"),
+    ):
+        source = dataset_dir / filename
+        if not source.exists():
+            continue
+        with source.open(encoding="utf-8", newline="") as handle:
+            valid_evidence_ids.update(
+                row[field] for row in csv.DictReader(handle) if row.get(field)
+            )
     with request_path.open(encoding="utf-8", newline="") as handle:
         expected = [row["case_id"] for row in csv.DictReader(handle)]
     with output_path.open(encoding="utf-8", newline="") as handle:
@@ -70,8 +84,14 @@ def validate_output(output_path: Path, request_path: Path) -> dict[str, Any]:
                 errors.append(f"{case_id} step {index}: invalid phase/operation/state {triple}")
             if status == "COMPLETE" and not step["evidence_id"]:
                 errors.append(f"{case_id} step {index}: COMPLETE verification lacks evidence")
+            if status == "INCOMPLETE" and step["phase"] == "FINDING" and not step["evidence_id"]:
+                errors.append(f"{case_id} step {index}: finding lacks evidence")
             if status == "INCOMPLETE" and step["phase"] != "FINDING" and step["evidence_id"]:
                 errors.append(f"{case_id} step {index}: future action cites evidence")
+            if step["evidence_id"] and step["evidence_id"] not in valid_evidence_ids:
+                errors.append(
+                    f"{case_id} step {index}: unknown evidence_id {step['evidence_id']}"
+                )
             keys.append((PHASE_ORDER[step["phase"]], OPERATION_ORDER[step["operation"]], step["system_id"], step["resource_id"]))
         if keys != sorted(keys):
             errors.append(f"{case_id}: steps are not canonically ordered")

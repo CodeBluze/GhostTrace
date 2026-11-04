@@ -36,10 +36,10 @@
           <kbd>/</kbd>
         </label>
         <div class="segments" id="statusFilters" role="group" aria-label="Filter by status">
-          <button class="active" data-status="">All</button>
-          <button data-status="INCOMPLETE">Open</button>
-          <button data-status="COMPLETE">Clear</button>
-          <button data-status="NOT_APPLICABLE">N/A</button>
+          <button class="active" data-status="" aria-pressed="true">All</button>
+          <button data-status="INCOMPLETE" aria-pressed="false">Open</button>
+          <button data-status="COMPLETE" aria-pressed="false">Clear</button>
+          <button data-status="NOT_APPLICABLE" aria-pressed="false">N/A</button>
         </div>
         <div class="case-list" id="caseList" aria-live="polite"></div>
       </aside>
