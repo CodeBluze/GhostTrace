@@ -30,6 +30,15 @@ class GhostTraceEngineTests(unittest.TestCase):
         unresolved = [case.case_id for case in self.engine.cases if self.engine.identities.resolve(case) is None]
         self.assertEqual(unresolved, [])
 
+    def test_every_manifest_artifact_exists_and_extracts(self) -> None:
+        missing = [
+            item.path
+            for item in self.engine.evidence.files
+            if not (self.dataset / item.path).is_file()
+        ]
+        self.assertEqual(missing, [])
+        self.assertEqual(self.engine.evidence.extraction_warnings, [])
+
     def test_intent_gate_matches_known_non_deletion_requests(self) -> None:
         not_applicable = {f"case_{number}" for number in range(533, 543)}
         classified = {case.case_id for case in self.engine.cases if not authorizes_deletion(case.request_text)}

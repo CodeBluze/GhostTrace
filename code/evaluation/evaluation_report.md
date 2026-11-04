@@ -91,4 +91,4 @@ python3 code/main.py run
 python3 code/main.py validate
 ```
 
-Final regression result: **16/16 tests pass**.
+Final regression result: **17/17 tests pass**. The suite includes a manifest-completeness and extraction-health gate so a checkout cannot silently omit participant evidence.
