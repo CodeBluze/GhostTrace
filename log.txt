@@ -284,3 +284,47 @@ branch=codex/ghosttrace-accuracy-hardening
 repo_root=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
 worktree=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
 parent_agent=none
+
+## [2026-11-04T22:11:13+05:30] Realistic scoring headroom assessed
+
+User Prompt (verbatim, secrets redacted):
+is this the maximum we can realistically achieve or is there more
+
+Agent Response Summary:
+Assessed the merged release against the published judging dimensions and measured evaluation results. Concluded that the system is production-complete and already maximizes public verdict accuracy, but is not yet the realistic scoring ceiling because exact row and sequence accuracy remain 50%. Identified generalized cross-case resource assignment and stronger evidence-graph reconciliation as the remaining high-value, integrity-preserving path rather than case hardcoding.
+
+Actions:
+* Reviewed `problem_statement.md`, `WINNING_STRATEGY.md`, and `code/evaluation/evaluation_report.md`.
+* Compared the published judging dimensions with the current public metrics and documented evidence gaps.
+
+Context:
+tool=Codex desktop
+model=GPT-5
+branch=main
+repo_root=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
+worktree=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
+parent_agent=none
+
+## [2026-11-04T22:32:22+05:30] Cutoff-safe ultimate attribution hardening completed
+
+User Prompt (verbatim, secrets redacted):
+we must max out everything to win go ultimate god mode and become the elite version of urself and max out everything as much as possible for winning this hackathon proceed with highest engineering standards
+
+Agent Response Summary:
+Implemented the highest-value remaining generalized accuracy improvement without hardcoding public labels or violating the evidence cutoff. GhostTrace now solves anonymous workflow targets through invariant one-to-one batch assignment, preserves source-level log timestamps, and independently validates 164 attributed targets with zero mismatches. The full system was rebuilt and passed its complete contract, evaluation, archive-integrity, and clean-checkout release gates.
+
+Actions:
+* Added a cutoff-aware bipartite workflow attribution solver with conflict rejection, explicit anchors, and invariant-only resolution.
+* Added temporal identity views, indexed ownership reconciliation, and source event-time parsing for structured logs.
+* Expanded regression coverage to 21 tests, including independent assignment precision and temporal safety gates.
+* Improved public step-field accuracy to 80.118%, step precision to 81.034%, and step recall to 73.057% while retaining 100% status accuracy.
+* Generated and validated all 518 output rows: 148 COMPLETE, 360 INCOMPLETE, and 10 NOT_APPLICABLE.
+* Rebuilt and integrity-tested the dataset-free 20-file code.zip, then reproduced all results from a fresh zero-cache clone.
+
+Context:
+tool=Codex desktop
+model=GPT-5
+branch=codex/ghosttrace-ultimate-hardening
+repo_root=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
+worktree=/Users/amoghrb/Documents/ChatGPT/halloween hackathon
+parent_agent=none

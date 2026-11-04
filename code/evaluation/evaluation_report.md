@@ -18,19 +18,19 @@ Environment: Python 3.14.0, deterministic local execution, 32 public sample case
 | --- | --- | ---: |
 | Case accuracy | Correct `deletion_status` | 32/32 = **100.000%** |
 | Row accuracy | Status and complete ordered step array exactly match | 16/32 = **50.000%** |
-| Field accuracy | Micro accuracy across seven aligned step fields; missing/extra steps count as seven misses | **78.792%** |
+| Field accuracy | Micro accuracy across seven aligned step fields; missing/extra steps count as seven misses | **80.118%** |
 | Sequence accuracy | Exact ordered `(phase, system, resource, operation, state)` sequence | 16/32 = **50.000%** |
-| Step precision | Exact predicted step objects also present in target | **79.651%** |
-| Step recall | Exact target step objects recovered | **70.984%** |
+| Step precision | Exact predicted step objects also present in target | **81.034%** |
+| Step recall | Exact target step objects recovered | **73.057%** |
 
-Status accuracy is the primary readiness gate because it measures whether GhostTrace reaches the correct deletion conclusion. The accuracy-hardening release raises verdict accuracy from 90.625% to 100%, exact rows from 18.750% to 50%, precision from 62.346% to 79.651%, and recall from 52.332% to 70.984%. Exact sequence remains lower because the participant-visible evidence does not consistently expose every subject-to-resource edge implied by the sample plan. The runtime intentionally refuses to recover those edges from labels.
+Status accuracy is the primary readiness gate because it measures whether GhostTrace reaches the correct deletion conclusion. Across the accuracy-hardening releases, verdict accuracy rose from 90.625% to 100%, exact rows from 18.750% to 50%, precision from 62.346% to 81.034%, and recall from 52.332% to 73.057%. Exact sequence remains lower because the participant-visible evidence does not consistently expose every subject-to-resource edge implied by the sample plan. The runtime intentionally refuses to recover those edges from labels.
 
 ## Full-dataset contract evaluation
 
 The production command emitted 518/518 canonically sorted rows and passed every validator rule:
 
 - Exact header and one row per request.
-- 143 `COMPLETE`, 365 `INCOMPLETE`, 10 `NOT_APPLICABLE`.
+- 148 `COMPLETE`, 360 `INCOMPLETE`, 10 `NOT_APPLICABLE`.
 - Valid JSON arrays and consecutive step numbering.
 - Legal status, phase, operation, and state combinations.
 - Evidence on `COMPLETE` verification and `INCOMPLETE` findings.
@@ -75,6 +75,8 @@ Generate the entire 518-row file in a temporary directory and run the strict val
 8. **Workflow/readback correlation.** Unique workflow targets can now be joined to independent cutoff-eligible absence or anonymization proof. The join is rejected when concurrent targets make attribution ambiguous.
 9. **Negative account proof.** A uniquely attributed account workflow can use a later, cutoff-eligible complete account snapshot as absence proof; activity success alone is never treated as proof.
 10. **Evidence integrity.** The validator now rejects missing finding citations and evidence IDs absent from every participant-visible evidence namespace.
+11. **Anonymous batch attribution.** Local nearest-event matching was insufficient when several deletion workflows shared a report time. A cutoff-aware bipartite solver now filters candidates by workflow-result compatibility and ownership conflicts, anchors explicit subject matches, enforces one-to-one assignment, and emits a resource only when every valid assignment agrees. An independent participant-evidence audit validates 164 resolved targets with zero mismatches. Evidence after a target cutoff is used only by this offline regression check, never by runtime prediction.
+12. **Source event-time reconstruction.** Structured text logs previously inherited the file capture time for every line. Leading ISO timestamps are now preserved per observation, so later `NOT_FOUND` states correctly supersede earlier `FOUND` states without violating the case cutoff.
 
 ## Remaining limitations
 
@@ -91,4 +93,4 @@ python3 code/main.py run
 python3 code/main.py validate
 ```
 
-Final regression result: **17/17 tests pass**. The suite includes a manifest-completeness and extraction-health gate so a checkout cannot silently omit participant evidence.
+Final regression result: **21/21 tests pass**. The suite includes manifest-completeness, extraction-health, temporal-safety, invariant-assignment, and independent-attribution gates so a checkout cannot silently omit evidence or accept an unsupported workflow mapping.

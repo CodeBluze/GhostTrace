@@ -9,6 +9,7 @@ from .domain import Case, Decision, Observation, Step, latest_by_resource, parse
 from .evidence import EvidenceIndex
 from .identity import IdentityIndex
 from .intent import authorizes_deletion
+from .workflow import WorkflowAttributor
 
 
 PHASE_ORDER = {"FINDING": 0, "REMEDIATION": 1, "VERIFICATION": 2}
@@ -65,6 +66,15 @@ class GhostTraceEngine:
         self.identities = IdentityIndex(self.dataset_dir)
         self.evidence = EvidenceIndex(self.dataset_dir, cache_dir=cache_dir)
         self.cases = self._load_cases(self.dataset_dir / "deletion_requests.csv")
+        context_cases = list(self.cases)
+        sample_path = self.dataset_dir / "sample_deletion_requests.csv"
+        if sample_path.is_file():
+            context_cases.extend(self._load_cases(sample_path))
+        self.workflow = WorkflowAttributor(
+            self.identities,
+            self.evidence,
+            context_cases,
+        )
 
     @staticmethod
     def _load_cases(path: Path) -> list[Case]:
@@ -104,7 +114,9 @@ class GhostTraceEngine:
             for observation in self.evidence.eligible(case.audit_at)
             if self.evidence.matches(observation, aliases, case.audit_at)
         ]
-        workflow_account = self.evidence.unambiguous_account_resource(case, aliases)
+        workflow_account = self.workflow.account_resource(
+            case
+        ) or self.evidence.unambiguous_account_resource(case, aliases)
         if workflow_account and not any(
             item.resource_id == workflow_account for item in observations
         ):
