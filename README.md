@@ -6,15 +6,17 @@ The submission is a complete local application: a deterministic audit engine, mu
 
 ## Download the verified submission
 
-Judges and reviewers can download the frozen submission directly from the public [`submission-v1.0.0` GitHub Release](https://github.com/CodeBluze/GhostTrace/releases/tag/submission-v1.0.0). No GitHub sign-in or repository clone is required.
+The frozen submission is mirrored inside this public repository so downloads do not depend on GitHub's separate Release Assets CDN. No GitHub sign-in or repository clone is required.
+
+> **Recommended:** **[Download all required artifacts in one ZIP](https://raw.githubusercontent.com/CodeBluze/GhostTrace/main/submission/GhostTrace_Submission_Artifacts.zip)**, then extract it to obtain `code.zip`, `output.csv`, and `log.txt`.
 
 | Required artifact | One-click download | Purpose |
 | --- | --- | --- |
-| `code.zip` | **[Download runnable solution](https://github.com/CodeBluze/GhostTrace/releases/download/submission-v1.0.0/code.zip)** | Code, prompts, configuration, README, and both required evaluation reports |
-| `output.csv` | **[Download 518-row prediction file](https://github.com/CodeBluze/GhostTrace/releases/download/submission-v1.0.0/output.csv)** | Final answers, sorted by `case_id` |
-| `log.txt` | **[Download AI chat transcript](https://github.com/CodeBluze/GhostTrace/releases/download/submission-v1.0.0/log.txt)** | Required development conversation log |
+| `code.zip` | **[Download runnable solution](https://raw.githubusercontent.com/CodeBluze/GhostTrace/main/submission/code.zip)** | Code, prompts, configuration, README, and both required evaluation reports |
+| `output.csv` | **[Download 518-row prediction file](https://raw.githubusercontent.com/CodeBluze/GhostTrace/main/submission/output.csv)** | Final answers, sorted by `case_id` |
+| `log.txt` | **[Download AI chat transcript](https://raw.githubusercontent.com/CodeBluze/GhostTrace/main/submission/log.txt)** | Required development conversation log |
 
-GitHub is a convenient mirror for reviewers. The official submission must still be uploaded through the [HackerRank challenge page](https://www.hackerrank.com/contests/hackerrank-orchestrate-october26/challenges/ghost-data-still-exists).
+These repository-hosted files are byte-for-byte mirrors of the published [`submission-v1.0.0` release assets](https://github.com/CodeBluze/GhostTrace/releases/tag/submission-v1.0.0). Their SHA-256 checksums are recorded in [`submission/SHA256SUMS.txt`](submission/SHA256SUMS.txt). The official submission must still be uploaded through the [HackerRank challenge page](https://www.hackerrank.com/contests/hackerrank-orchestrate-october26/challenges/ghost-data-still-exists).
 
 ## What ships
 
